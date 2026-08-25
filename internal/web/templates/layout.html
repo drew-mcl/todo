@@ -1,0 +1,262 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Heading}} · todo</title>
+<link rel="icon" href="/static/favicon.svg">
+<script>try{var d=document.documentElement,p=localStorage.getItem("todo.palette"),t=localStorage.getItem("todo.theme");if(p)d.dataset.palette=p;if(t)d.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/sortable.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body data-view="{{.View}}" data-sort="{{.Sort}}"{{if .Open}} data-capture-open="1"{{end}}>
+<a class="skip-link" href="#list">Skip to the list</a>
+
+<aside class="sidebar">
+  <div class="brand-row">
+  <a class="brand" href="/view/all" title="Everything open">
+    <svg class="brand-mark" viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false">
+      <rect x="1" y="3" width="2.4" height="18" rx="1.2" class="brand-pipe"/>
+      <rect x="8.5" y="4.4" width="14.5" height="2.4" rx="1.2" fill="currentColor" opacity=".9"/>
+      <rect x="8.5" y="10.8" width="10.5" height="2.4" rx="1.2" fill="currentColor" opacity=".5"/>
+      <rect x="8.5" y="17.2" width="14.5" height="2.4" rx="1.2" fill="currentColor" opacity=".26"/>
+    </svg>
+    <span class="brand-name">todo</span>
+  </a>
+  <button type="button" class="rail-toggle" data-sidebar-toggle aria-label="Collapse sidebar">
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/>
+    </svg>
+  </button>
+  </div>
+
+  <button type="button" class="capture-open" data-capture-toggle>
+    Capture<kbd>N</kbd>
+  </button>
+
+  {{template "viewnav" .}}
+
+  {{template "navgroup" dict "Key" "topics" "Label" "Topics" "Items" .Topics
+      "Param" "topic" "Current" .Topic "Prefix" "" "Class" "nav-topic"}}
+
+  {{template "navgroup" dict "Key" "people" "Label" "People" "Items" .People
+      "Param" "assignee" "Current" .Assignee "Prefix" "" "Class" "nav-person"}}
+
+  {{template "navgroup" dict "Key" "tags" "Label" "Tags" "Items" .Tags
+      "Param" "tag" "Current" .Tag "Prefix" "#" "Class" "sg-tag"}}
+  <div class="sidebar-foot">
+    <button type="button" class="keymap-open" data-keymap-toggle>Shortcuts<kbd>?</kbd></button>
+    <button type="button" class="settings-open" data-settings-toggle aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
+        <circle cx="10" cy="10" r="2.6"/>
+        <path d="M10 1.9v2.2M10 15.9v2.2M18.1 10h-2.2M4.1 10H1.9M15.7 4.3l-1.6 1.6M5.9 14.1l-1.6 1.6M15.7 15.7l-1.6-1.6M5.9 5.9L4.3 4.3"/>
+      </svg>
+    </button>
+  </div>
+</aside>
+
+<button type="button" class="rail-open" data-sidebar-toggle aria-label="Show sidebar">
+  <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
+    <rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/>
+  </svg>
+</button>
+
+<main class="main" id="list">
+  <header class="main-head">
+    <div class="main-title">
+      <h1>{{.Heading}}</h1>
+    </div>
+
+    {{if not .Plan}}
+    <form class="controls" method="get" action="/view/{{.View}}" role="search">
+      {{if .Topic}}<input type="hidden" name="topic" value="{{.Topic}}">{{end}}
+      {{if .Tag}}<input type="hidden" name="tag" value="{{.Tag}}">{{end}}
+      {{if .Assignee}}<input type="hidden" name="assignee" value="{{.Assignee}}">{{end}}
+
+      <div class="search-wrap{{if .Search}} is-open{{end}}" data-search-wrap>
+        <button type="button" class="search-btn" data-search-open aria-label="Search tasks">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
+            <circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4L14 14"/>
+          </svg>
+        </button>
+        <input class="search" type="search" name="q" value="{{.Search}}"
+               placeholder="Search" aria-label="Search tasks" data-search>
+      </div>
+
+      <label class="sort">
+        <span class="sr-only">Sort by</span>
+        <select name="sort" data-sort-select>
+          {{$s := .Sort}}
+          {{range sorts}}<option value="{{.}}"{{if eq . $s}} selected{{end}}>{{.Title}}</option>{{end}}
+        </select>
+      </label>
+    </form>
+    {{end}}
+  </header>
+
+  {{if .Filtered}}
+  <p class="filter-bar">
+    Filtered{{if .Topic}} to <strong>{{.Topic}}</strong>{{end}}{{if .Tag}} to <strong>#{{.Tag}}</strong>{{end}}{{if .Assignee}} to <strong>{{who .Assignee}}</strong>{{end}}{{if .Search}} by <strong>{{.Search}}</strong>{{end}}.
+    <a href="/view/{{.View}}">Clear</a>
+  </p>
+  {{end}}
+
+  {{if .Plan}}{{template "week" .}}{{else}}{{template "list" .}}{{end}}
+</main>
+
+{{template "capture" .}}
+
+<div class="detail" id="detail"></div>
+
+{{template "keymap"}}
+
+{{template "settings"}}
+
+<div class="toasts" id="toasts" aria-live="polite">
+  {{if .Undo}}
+  <div class="toast" data-autohide>
+    <span>Added {{plural .Undo.Count "task" "tasks"}}.</span>
+    <button type="button" class="toast-action"
+            hx-post="/batches/{{.Undo.BatchID}}/undo"
+            hx-vals='{"view":"{{.View}}"}'>Undo</button>
+  </div>
+  {{end}}
+</div>
+</body>
+</html>{{end}}
+
+{{define "viewnav"}}
+<div id="view-nav"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{$view := .View}}{{$counts := .Counts}}
+
+  <a class="nav-item nav-pinned{{if and (eq $view "all") (not .OnWeek)}} is-current{{end}}" href="/view/all">
+    <span class="nav-label">All</span>
+    <kbd>A</kbd>
+  </a>
+
+  <a class="nav-item nav-pinned nav-week{{if .OnWeek}} is-current{{end}}" href="/week">
+    <span class="nav-label">Week</span>
+    <kbd>W</kbd>
+  </a>
+
+  <hr class="nav-break">
+
+  <nav class="nav" data-section="filters" aria-label="Quick filters">
+    <button type="button" class="nav-head" data-collapse aria-expanded="true">
+      <span>Quick filters</span>{{template "chevron"}}
+    </button>
+    <div class="nav-body">
+      {{range views}}{{if ne . "all"}}
+      <a class="nav-item{{if eq . $view}} is-current{{end}}" href="/view/{{.}}">
+        <span class="nav-label">{{.Title}}</span>
+        {{with index $counts .}}<span class="nav-count">{{.}}</span>{{end}}
+      </a>
+      {{end}}{{end}}
+    </div>
+  </nav>
+</div>
+{{end}}
+
+{{define "counts-oob"}}{{template "viewnav" .}}{{end}}
+
+{{/* navgroup renders one collapsible list of filters discovered from your own
+     tasks: topics, the people you are waiting on, and tags. */}}
+{{define "navgroup"}}
+{{if .Items}}
+<nav class="nav" data-section="{{.Key}}" aria-label="{{.Label}}">
+  <button type="button" class="nav-head" data-collapse aria-expanded="true">
+    <span>{{.Label}}</span>{{template "chevron"}}
+  </button>
+  <div class="nav-body">
+    {{$p := .Param}}{{$cur := .Current}}{{$pre := .Prefix}}{{$cls := .Class}}
+    {{range .Items}}
+    <a class="nav-item{{if eq $cur .Name}} is-current{{end}}"
+       href="/view/all?{{$p}}={{.Name}}">
+      <span class="nav-label {{$cls}}">{{$pre}}{{.Name}}</span>
+      <span class="nav-count">{{.Count}}</span>
+    </a>
+    {{end}}
+  </div>
+</nav>
+{{end}}
+{{end}}
+
+{{define "chevron"}}<svg class="nav-chevron" viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" focusable="false"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg>{{end}}
+
+{{define "keymap"}}
+<div class="keymap" id="keymap" data-keymap hidden>
+  <div class="keymap-card" role="dialog" aria-label="Keyboard shortcuts" aria-modal="true">
+    <header class="keymap-head">
+      <h2 class="keymap-title">Keyboard</h2>
+      <button type="button" class="detail-close" data-keymap-toggle aria-label="Close">&times;</button>
+    </header>
+
+    <div class="keymap-cols">
+      <dl class="keymap-list">
+        <dt><kbd>n</kbd></dt><dd>Capture</dd>
+        <dt><kbd>a</kbd></dt><dd>Everything open</dd>
+        <dt><kbd>&#8984;</kbd><kbd>&#8629;</kbd></dt><dd>Add what you have typed</dd>
+        <dt><kbd>esc</kbd></dt><dd>Close capture, panel or search</dd>
+        <dt><kbd>/</kbd></dt><dd>Search</dd>
+        <dt><kbd>?</kbd></dt><dd>This list</dd>
+        <dt><kbd>[</kbd></dt><dd>Hide or show the sidebar</dd>
+      </dl>
+
+      <dl class="keymap-list">
+        <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Move down and up</dd>
+        <dt><kbd>x</kbd></dt><dd>Complete</dd>
+        <dt><kbd>e</kbd></dt><dd>Edit</dd>
+        <dt><kbd>u</kbd></dt><dd>Undo the last paste</dd>
+        <dt><kbd>w</kbd></dt><dd>Plan the week</dd>
+      </dl>
+    </div>
+
+    <dl class="keymap-jump">
+      <dt><kbd>g</kbd> then <kbd>t</kbd><kbd>u</kbd><kbd>a</kbd><kbd>d</kbd><kbd>l</kbd></dt>
+      <dd>Jump to Today, Upcoming, Anytime, Delegated or Logbook</dd>
+    </dl>
+
+    <div class="keymap-syntax">
+      <h3 class="keymap-sub">Shorthand</h3>
+      <p class="legend">
+        <code class="legend-line"><span class="sg-topic">topic</span> <span class="sg-pipe">|</span> what needs doing <span class="sg-pipe">|</span> <span class="sg-due">today</span> <span class="sg-who">@who</span> <span class="sg-pri">!!</span> <span class="sg-tag">#tag</span> <span class="sg-note">&gt; note</span></code>
+        <span class="legend-note"><code class="sg-topic">&quot;</code> in place of the topic repeats the line above</span>
+      </p>
+      <p class="keymap-note">Lines without a <code class="sg-pipe">|</code> are left alone, so a whole page of notes can go in at once. Dates understand <code>today</code>, <code>eow</code>, <code>fri</code>, <code>+3d</code>, <code>25/12</code>.</p>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "settings"}}
+<div class="keymap" id="settings" data-settings hidden>
+  <div class="keymap-card settings-card" role="dialog" aria-label="Settings" aria-modal="true">
+    <header class="keymap-head">
+      <h2 class="keymap-title">Settings</h2>
+      <button type="button" class="detail-close" data-settings-toggle aria-label="Close">&times;</button>
+    </header>
+
+    <div class="set-group">
+      <span class="set-label">Appearance</span>
+      <div class="segmented" role="group" aria-label="Appearance">
+        <button type="button" data-theme-set="system">Auto</button>
+        <button type="button" data-theme-set="light">Light</button>
+        <button type="button" data-theme-set="dark">Dark</button>
+      </div>
+    </div>
+
+    <div class="set-group">
+      <span class="set-label">Colour</span>
+      <div class="palette" role="group" aria-label="Colour scheme">
+        <button type="button" class="swatch swatch-graphite" data-palette-set="graphite">Graphite</button>
+        <button type="button" class="swatch swatch-ink" data-palette-set="ink">Ink</button>
+        <button type="button" class="swatch swatch-paper" data-palette-set="paper">Paper</button>
+        <button type="button" class="swatch swatch-obsidian" data-palette-set="obsidian">Obsidian</button>
+        <button type="button" class="swatch swatch-amber" data-palette-set="amber">Amber</button>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

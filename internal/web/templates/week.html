@@ -1,0 +1,110 @@
+{{define "week"}}
+{{$plan := .Plan}}
+<div class="week" data-week>
+  <div class="week-bar">
+    <div class="week-nav">
+      <a class="week-step" href="/week?start={{$plan.Prev}}" aria-label="Previous week">&larr;</a>
+      <a class="week-today" href="/week">This week</a>
+      <a class="week-step" href="/week?start={{$plan.Next}}" aria-label="Next week">&rarr;</a>
+    </div>
+    <p class="week-range">{{weekRange $plan}}</p>
+
+    <form class="week-filters" method="get" action="/week">
+      <input type="hidden" name="start" value="{{isoDate $plan.Start}}">
+      <label class="sort">
+        <span class="sr-only">Filter by topic</span>
+        <select name="topic" data-week-filter>
+          <option value="">All topics</option>
+          {{$t := .Topic}}
+          {{range .Topics}}<option value="{{.Name}}"{{if eq .Name $t}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <label class="sort">
+        <span class="sr-only">Filter by person</span>
+        <select name="assignee" data-week-filter>
+          <option value="">Anyone</option>
+          {{$a := .Assignee}}
+          {{range .People}}<option value="{{.Name}}"{{if eq .Name $a}} selected{{end}}>{{who .Name}}</option>{{end}}
+        </select>
+      </label>
+      {{if .Tags}}
+      <label class="sort">
+        <span class="sr-only">Filter by tag</span>
+        <select name="tag" data-week-filter>
+          <option value="">All tags</option>
+          {{$g := .Tag}}
+          {{range .Tags}}<option value="{{.Name}}"{{if eq .Name $g}} selected{{end}}>#{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      {{end}}
+      {{if .Filtered}}<a class="week-clear" href="/week?start={{isoDate $plan.Start}}">Clear</a>{{end}}
+    </form>
+
+    <p class="week-hint">Drag onto a day to schedule</p>
+  </div>
+
+  <div class="week-grid">
+    {{range $plan.Days}}
+    <section class="day{{if isToday .Date}} is-today{{end}}{{if isPast .Date}} is-past{{end}}">
+      <header class="day-head">
+        <span class="day-name">{{dayName .Date}}</span>
+        <span class="day-num">{{dayNum .Date}}</span>
+      </header>
+      <ul class="day-list" role="list" data-drop data-date="{{isoDate .Date}}">
+        {{range .Tasks}}{{template "card" dict "Task" . "View" "all"}}{{end}}
+      </ul>
+    </section>
+    {{end}}
+  </div>
+
+  <div class="trays">
+    <section class="tray">
+      <header class="tray-head">
+        <h2>Overdue</h2>
+        <span class="tray-count">{{len $plan.Overdue}}</span>
+      </header>
+      <ul class="tray-list" role="list" data-drop data-date="">
+        {{range $plan.Overdue}}{{template "card" dict "Task" . "View" "all"}}{{end}}
+        {{if not $plan.Overdue}}<li class="tray-empty">Nothing late.</li>{{end}}
+      </ul>
+    </section>
+
+    <section class="tray">
+      <header class="tray-head">
+        <h2>Unscheduled</h2>
+        <span class="tray-count">{{len $plan.Unscheduled}}</span>
+      </header>
+      <ul class="tray-list" role="list" data-drop data-date="">
+        {{range $plan.Unscheduled}}{{template "card" dict "Task" . "View" "all"}}{{end}}
+        {{if not $plan.Unscheduled}}<li class="tray-empty">Everything has a day.</li>{{end}}
+      </ul>
+    </section>
+  </div>
+</div>
+{{end}}
+
+{{/* card is the compact form of a task used on the planning board. */}}
+{{define "card"}}
+<li class="card{{if .Task.Done}} is-done{{end}}" id="task-{{.Task.ID}}" data-id="{{.Task.ID}}">
+  <button type="button" class="check card-check" role="checkbox"
+          aria-checked="{{if .Task.Done}}true{{else}}false{{end}}"
+          aria-label="Complete {{.Task.Title}}"
+          hx-post="/tasks/{{.Task.ID}}/toggle"
+          hx-vals='{"view":"all"}'
+          hx-target="#task-{{.Task.ID}}"
+          hx-swap="outerHTML">
+    <svg class="check-tick" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M3.5 8.5l3 3 6-7"/>
+    </svg>
+  </button>
+  <div class="card-body">
+    <span class="card-title">{{.Task.Title}}</span>
+    <span class="card-meta">
+      <span class="card-topic">{{.Task.Topic}}</span>
+      {{if .Task.Assignee}}<span class="sg-who">{{who .Task.Assignee}}</span>{{end}}
+      {{range .Task.Tags}}<span class="sg-tag">#{{.}}</span>{{end}}
+    </span>
+  </div>
+  {{if .Task.Priority}}<span class="card-pri sg-pri">{{bangs .Task.Priority}}</span>{{end}}
+</li>
+{{end}}

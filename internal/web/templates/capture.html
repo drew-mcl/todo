@@ -1,0 +1,83 @@
+{{define "capture"}}
+<div class="sheet" id="capture" data-capture hidden>
+  <form class="sheet-inner" method="post" action="/capture" data-capture-form>
+    <input type="hidden" name="view" value="{{.View}}">
+
+    <header class="sheet-head">
+      <h2 class="sheet-title">Capture</h2>
+      <p class="sheet-hint">
+        <kbd>⌘</kbd><kbd>↵</kbd> to add ·
+        <kbd>esc</kbd> to close — your draft is kept
+      </p>
+    </header>
+
+    <textarea class="draft" name="draft" data-draft spellcheck="false"
+              aria-label="Paste your notes"
+              hx-post="/capture/preview"
+              hx-trigger="input changed delay:150ms"
+              hx-target="#preview"
+              hx-swap="innerHTML"
+              placeholder="Paste your notes. Lines with a | become tasks, everything else is left alone.&#10;&#10;prod issue | find out why alerts fired | today @sam !!&#10;> 3am spike, check the ingest lag dashboard&#10;admin | quarterly training | eow #compliance">{{.Draft}}</textarea>
+
+    <div id="preview" class="preview">{{template "preview-idle" .}}</div>
+
+    <footer class="sheet-foot">
+      <p class="legend">
+        <code class="legend-line"><span class="sg-topic">topic</span> <span class="sg-pipe">|</span> what needs doing <span class="sg-pipe">|</span> <span class="sg-due">today</span> <span class="sg-who">@who</span> <span class="sg-pri">!!</span> <span class="sg-tag">#tag</span> <span class="sg-note">&gt; note</span></code>
+        <span class="legend-note"><code class="sg-topic">&quot;</code> in place of the topic repeats the line above</span>
+      </p>
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-quiet" data-capture-toggle>Cancel</button>
+        <button type="submit" class="btn btn-go" data-add-button>Add tasks</button>
+      </div>
+    </footer>
+  </form>
+</div>
+{{end}}
+
+{{define "preview-idle"}}
+<p class="preview-idle">Your lines appear here as they'll be filed.</p>
+{{end}}
+
+{{define "preview"}}
+{{if .Any}}
+<p class="preview-summary">{{.Summary}}</p>
+<ol class="preview-lines">
+  {{range .Lines}}
+    {{if .Task}}
+    <li class="pv pv-task">
+      <code class="pv-raw">{{template "raw" .Raw}}</code>
+      <div class="pv-card">
+        <span class="pv-topic">{{.Task.Topic}}</span>
+        <span class="pv-title">{{.Task.Title}}</span>
+        <span class="pv-meta">
+          {{if .Task.Due}}<span class="sg-due">{{due .Task.Due}}</span>{{end}}
+          {{if .Task.Assignee}}<span class="sg-who">{{who .Task.Assignee}}</span>{{end}}
+          {{if .Task.Priority}}<span class="sg-pri">{{bangs .Task.Priority}}</span>{{end}}
+          {{range .Task.Tags}}<span class="sg-tag">#{{.}}</span>{{end}}
+        </span>
+        {{if .Task.Note}}<div class="pv-note">{{range lines .Task.Note}}<p>{{.}}</p>{{end}}</div>{{end}}
+      </div>
+      {{if .Task.Warning}}<p class="pv-warn">{{.Task.Warning}}</p>{{end}}
+    </li>
+    {{else if eq .Kind "note"}}
+    <li class="pv pv-attached">
+      <code class="pv-raw">{{template "raw" .Raw}}</code>
+      <span class="pv-tag-note">↳ attached</span>
+    </li>
+    {{else if eq .Kind "skipped"}}
+    <li class="pv pv-skip">
+      <code class="pv-raw">{{.Raw}}</code>
+      <span class="pv-reason">{{.Reason}}</span>
+      <button type="button" class="pv-promote" data-promote="{{.N}}"
+              title="File this line under inbox">Make a task</button>
+    </li>
+    {{end}}
+  {{end}}
+</ol>
+{{else}}
+{{template "preview-idle" .}}
+{{end}}
+{{end}}
+
+{{define "raw"}}{{range highlight .}}<span class="sg-{{.Kind}}">{{.Text}}</span>{{end}}{{end}}
