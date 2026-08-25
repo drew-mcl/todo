@@ -17,9 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drew-mcl/todo/internal/api"
 	"github.com/drew-mcl/todo/internal/parse"
 	"github.com/drew-mcl/todo/internal/store"
-	"github.com/drew-mcl/todo/internal/web"
+	"github.com/drew-mcl/todo/internal/ui"
 )
 
 const usage = `todo -- capture meeting notes as tasks
@@ -75,10 +76,7 @@ func serve(args []string) error {
 	}
 	defer st.Close()
 
-	srv, err := web.New(st, time.Now)
-	if err != nil {
-		return err
-	}
+	srv := api.New(st, time.Now, ui.Handler())
 
 	// Loopback only. This is a personal list with no authentication in front of
 	// it, so it must never be reachable from the network.
