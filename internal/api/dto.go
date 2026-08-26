@@ -108,9 +108,13 @@ type ListResponse struct {
 	View     string    `json:"view"`
 	Sort     string    `json:"sort"`
 	Sections []Section `json:"sections"`
-	Total    int       `json:"total"`
-	CanDrag  bool      `json:"canDrag"`
-	Meta     Meta      `json:"meta"`
+	// Total is how many match; Shown is how many came back. They differ only
+	// when a list is large enough that sending it all would be the bug.
+	Total     int  `json:"total"`
+	Shown     int  `json:"shown"`
+	Truncated bool `json:"truncated"`
+	CanDrag   bool `json:"canDrag"`
+	Meta      Meta `json:"meta"`
 }
 
 // Day is one column of the week planner.

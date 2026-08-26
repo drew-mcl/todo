@@ -15,7 +15,7 @@ dev:
 test:
 	go vet ./...
 	go test ./...
-	cd ui && npx tsc --noEmit
+	cd ui && npm test && npx tsc --noEmit
 
 clean:
 	rm -f todo

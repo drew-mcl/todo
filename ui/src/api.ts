@@ -68,6 +68,8 @@ export type ListResponse = {
   sort: string;
   sections: Section[];
   total: number;
+  shown: number;
+  truncated: boolean;
   canDrag: boolean;
   meta: Meta;
 };
@@ -149,9 +151,12 @@ export const WHEN = [
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** The input the server refused, when it named one. */
+  field?: string;
+  constructor(status: number, message: string, field?: string) {
     super(message);
     this.status = status;
+    this.field = field;
   }
 }
 
@@ -162,13 +167,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
+    let field: string | undefined;
     try {
       const body = await res.json();
       if (body?.error) message = body.error;
+      if (body?.field) field = body.field;
     } catch {
       // A non-JSON error body is not worth surfacing verbatim.
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, field);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

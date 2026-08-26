@@ -109,5 +109,11 @@ There is one parser and it is in Go. The capture preview, the list and the CLI
 all go through it, so they cannot disagree about what a line means — the client
 renders what it is told and derives nothing.
 
-Database at `~/.local/share/todo/todo.db`, or set `TODO_DB`. Serves on 127.0.0.1
-only — there is no auth, so keep it off the network.
+Database at `~/.local/share/todo/todo.db`, or set `TODO_DB`.
+
+It binds to 127.0.0.1 and refuses any request that was not addressed to loopback
+or that names another site as its origin. That matters more than it sounds: a
+server on localhost is reachable by every page you visit, and a POST with a
+plain content type is never preflighted, so without the check any website could
+write to your list. Settings has **export everything** — it is your data, in
+plain text, whenever you want it.

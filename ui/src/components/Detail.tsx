@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type Task } from "../api";
+import { ApiError, api, type Task } from "../api";
+import clsx from "clsx";
 import { Field, Segmented, inputClass } from "./Field";
 import { TopicDot } from "./TaskRow";
 
@@ -17,14 +18,21 @@ export function Detail({
 }) {
   const [draft, setDraft] = useState<Task | undefined>(task);
   const [dueText, setDueText] = useState("");
+  // The due field shows a friendly label ("Wed 16 Sep", "6 days overdue") which
+  // is not something the date reader can read back. So it is only ever sent
+  // when it was actually typed in.
+  const [dueEdited, setDueEdited] = useState(false);
   const [tagText, setTagText] = useState("");
   const [error, setError] = useState<string>();
+  const [badField, setBadField] = useState<string>();
 
   useEffect(() => {
     setDraft(task);
     setDueText(task?.dueLabel ?? "");
+    setDueEdited(false);
     setTagText(task?.tags.join(", ") ?? "");
     setError(undefined);
+    setBadField(undefined);
   }, [task]);
 
   async function save() {
@@ -36,13 +44,14 @@ export function Detail({
         note: draft.note,
         assignee: draft.assignee,
         priority: draft.priority,
-        due: dueText,
+        ...(dueEdited ? { due: dueText } : {}),
         tags: tagText.split(/[,\s#]+/).filter(Boolean),
       });
       onSaved(saved);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save that.");
+      setBadField(e instanceof ApiError ? e.field : undefined);
     }
   }
 
@@ -94,8 +103,12 @@ export function Detail({
                 <input
                   value={dueText}
                   placeholder="today, eow, 25/12"
-                  onChange={(e) => setDueText(e.target.value)}
-                  className={inputClass}
+                  onChange={(e) => {
+                    setDueText(e.target.value);
+                    setDueEdited(true);
+                    setBadField(undefined);
+                  }}
+                  className={clsx(inputClass, badField === "due" && "border-danger")}
                 />
               </Field>
             </div>

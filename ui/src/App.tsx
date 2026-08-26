@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type Task } from "./api";
+import { api, type ListResponse, type Task } from "./api";
 import { useRoute } from "./lib/route";
 import { usePrefs } from "./lib/prefs";
 import { Sidebar } from "./components/Sidebar";
@@ -35,8 +35,9 @@ export function App() {
 
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [detail, setDetail] = useState<Task>();
-  const [cursor, setCursor] = useState(0);
+  const [cursorId, setCursorId] = useState<number | null>(null);
   const [undo, setUndo] = useState<{ batchId: number; added: number }>();
+  const [problem, setProblem] = useState<string>();
   const [searching, setSearching] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -60,32 +61,80 @@ export function App() {
   const meta = (isWeek ? week.data?.meta : list.data?.meta) ?? undefined;
   const overdueCount = meta?.counts.overdue ?? 0;
   const flat = useMemo(
-    () => list.data?.sections.flatMap((s) => s.tasks) ?? [],
-    [list.data],
+    () => (isWeek || isCalls ? [] : (list.data?.sections.flatMap((s) => s.tasks) ?? [])),
+    [list.data, isWeek, isCalls],
   );
+  // Everything, for a capture or an undo that can change any list.
   const invalidate = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["list"] });
     void qc.invalidateQueries({ queryKey: ["week"] });
     void qc.invalidateQueries({ queryKey: ["sessions"] });
   }, [qc]);
 
+  // Just the board you are looking at, for edits to a single task.
+  const refresh = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: [isWeek ? "week" : "list"] });
+  }, [qc, isWeek]);
+
+  const onFailed = useCallback(
+    (e: unknown) => setProblem(e instanceof Error ? e.message : "That did not work."),
+    [],
+  );
+
   const toggle = useMutation({
     mutationFn: (t: Task) => api.toggle(t.id),
-    onSuccess: invalidate,
+    // Tick immediately; the list catches up behind it.
+    onMutate: async (t: Task) => {
+      await qc.cancelQueries({ queryKey: ["list", filters] });
+      const previous = qc.getQueryData<ListResponse>(["list", filters]);
+      qc.setQueryData<ListResponse>(["list", filters], (old) =>
+        old
+          ? {
+              ...old,
+              sections: old.sections.map((s) => ({
+                ...s,
+                tasks: s.tasks.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)),
+              })),
+            }
+          : old,
+      );
+      return { previous };
+    },
+    onError: (e, _t, ctx) => {
+      if (ctx?.previous) qc.setQueryData(["list", filters], ctx.previous);
+      onFailed(e);
+    },
+    onSettled: refresh,
   });
   const schedule = useMutation({
     mutationFn: ({ id, date }: { id: number; date: string }) => api.schedule(id, date),
-    onSuccess: invalidate,
+    onSuccess: refresh,
+    onError: onFailed,
   });
   const move = useMutation({
     mutationFn: ({ id, above, below }: { id: number; above: number; below: number }) =>
       api.move(id, above, below),
-    onSuccess: invalidate,
+    onSuccess: refresh,
+    onError: onFailed,
   });
 
-  useEffect(() => setCursor(0), [route.kind, filters.view, filters.topic, filters.assignee, filters.tag, filters.q]);
+  useEffect(() => setCursorId(null), [
+    route.kind, filters.view, filters.topic, filters.assignee, filters.tag, filters.q,
+  ]);
 
-  const cursorTask = flat[cursor];
+  // Held by id rather than by index: completing a task used to leave the cursor
+  // pointing at whatever slid up into that row.
+  const cursorIndex = cursorId === null ? 0 : Math.max(0, flat.findIndex((t) => t.id === cursorId));
+  const cursorTask = flat[cursorIndex];
+
+  const moveCursor = useCallback(
+    (delta: number) => {
+      if (flat.length === 0) return;
+      const next = Math.min(flat.length - 1, Math.max(0, cursorIndex + delta));
+      setCursorId(flat[next].id);
+    },
+    [flat, cursorIndex],
+  );
 
   const setFilter = useCallback(
     (kind: "topic" | "assignee" | "tag", value: string) =>
@@ -176,11 +225,11 @@ export function App() {
           break;
         case "j":
           e.preventDefault();
-          setCursor((c) => Math.min(flat.length - 1, c + 1));
+          moveCursor(cursorId === null ? 0 : 1);
           break;
         case "k":
           e.preventDefault();
-          setCursor((c) => Math.max(0, c - 1));
+          moveCursor(cursorId === null ? 0 : -1);
           break;
         case "x":
           if (cursorTask) {
@@ -219,7 +268,7 @@ export function App() {
     }
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [overlay, detail, searching, filters, flat.length, cursorTask, undo, prefs.sidebar, go, update, toggle, invalidate]);
+  }, [overlay, detail, searching, filters, flat.length, cursorTask, cursorId, moveCursor, undo, prefs.sidebar, go, update, toggle, invalidate]);
 
   // Keep the keyboard cursor in view as it moves.
   useEffect(() => {
@@ -234,6 +283,12 @@ export function App() {
     const id = setTimeout(() => setUndo(undefined), 12_000);
     return () => clearTimeout(id);
   }, [undo]);
+
+  useEffect(() => {
+    if (!problem) return;
+    const id = setTimeout(() => setProblem(undefined), 6_000);
+    return () => clearTimeout(id);
+  }, [problem]);
 
   const heading = isWeek
     ? "week"
@@ -378,11 +433,16 @@ export function App() {
                   onClearFilter={() => go("list", { view: filters.view ?? "today" })}
                 />
               )}
+          {list.data?.truncated && (
+            <p className="mt-4 font-mono text-xs text-ink-4">
+              showing the first {list.data.shown} of {list.data.total} — narrow it with a filter
+            </p>
+          )}
         </main>
 
         <StatusBar
           view={heading}
-          position={!isWeek && !isCalls && flat.length ? cursor + 1 : null}
+          position={!isWeek && !isCalls && flat.length ? cursorIndex + 1 : null}
           total={
             isWeek
               ? (week.data
@@ -402,6 +462,22 @@ export function App() {
           onSaved={invalidate}
           onDeleted={invalidate}
         />
+
+        <AnimatePresence>
+          {problem && (
+            <motion.div
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 8, opacity: 0 }}
+              className="absolute bottom-10 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full border border-danger/30 bg-danger-soft px-4 py-2 font-mono text-base text-danger backdrop-blur"
+            >
+              <span>{problem}</span>
+              <button onClick={() => setProblem(undefined)} className="opacity-60 hover:opacity-100">
+                ✕
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence>
           {undo && (

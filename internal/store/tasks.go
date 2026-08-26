@@ -167,20 +167,11 @@ type Query struct {
 	Batch    int64  // narrow to one capture session
 	From     string // ISO date: captured on or after
 	To       string // ISO date: captured on or before
+	Limit    int    // 0 means no limit
 }
 
-const selectCols = `SELECT id, topic, title, note, due_date, assignee, priority, status,
-	position, batch_id, raw, created_at, completed_at,
-	COALESCE((SELECT group_concat(tag, ',') FROM tags WHERE task_id = tasks.id), '')
-	FROM tasks`
-
-// List returns the tasks matching q. Two views override the sort, because their
-// whole organising idea is a date: Upcoming always runs forwards in time, and
-// Logbook always runs backwards from the last thing finished.
-func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
-	where, args := q.View.where(truncate(now).Format(dateLayout))
-	clauses := []string{where}
-
+// narrow appends the filters shared by List and Count.
+func (q Query) narrow(clauses []string, args []any) ([]string, []any) {
 	if q.Topic != "" {
 		clauses = append(clauses, "topic = ?")
 		args = append(args, q.Topic)
@@ -212,6 +203,22 @@ func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
 		like := "%" + q.Search + "%"
 		args = append(args, like, like, like)
 	}
+	return clauses, args
+}
+
+const selectCols = `SELECT id, topic, title, note, due_date, assignee, priority, status,
+	position, batch_id, raw, created_at, completed_at,
+	COALESCE((SELECT group_concat(tag, ',') FROM tags WHERE task_id = tasks.id), '')
+	FROM tasks`
+
+// List returns the tasks matching q. Two views override the sort, because their
+// whole organising idea is a date: Upcoming always runs forwards in time, and
+// Logbook always runs backwards from the last thing finished.
+func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
+	where, args := q.View.where(truncate(now).Format(dateLayout))
+	clauses := []string{where}
+
+	clauses, args = q.narrow(clauses, args)
 
 	order := q.Sort.orderBy()
 	switch q.View {
@@ -221,9 +228,11 @@ func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
 		order = "completed_at DESC"
 	}
 
-	rows, err := s.db.Query(
-		fmt.Sprintf("%s WHERE %s ORDER BY %s", selectCols, strings.Join(clauses, " AND "), order),
-		args...)
+	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", selectCols, strings.Join(clauses, " AND "), order)
+	if q.Limit > 0 {
+		sql += fmt.Sprintf(" LIMIT %d", q.Limit)
+	}
+	rows, err := s.db.Query(sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks: %w", err)
 	}
@@ -238,6 +247,20 @@ func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// Count is how many tasks match, whatever the limit returned.
+func (s *Store) Count(q Query, now time.Time) (int, error) {
+	where, args := q.View.where(truncate(now).Format(dateLayout))
+	clauses := []string{where}
+	clauses, args = q.narrow(clauses, args)
+
+	var n int
+	err := s.db.QueryRow("SELECT count(*) FROM tasks WHERE "+strings.Join(clauses, " AND "), args...).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting tasks: %w", err)
+	}
+	return n, nil
 }
 
 type scanner interface{ Scan(...any) error }
@@ -530,7 +553,7 @@ const rebalanceGap = 1e-6
 // Move places task id between the tasks above and below it in the list. Either
 // neighbour may be 0, meaning the task was dropped at that end.
 func (s *Store) Move(id, above, below int64) error {
-	pos, err := s.midpoint(above, below)
+	pos, err := s.midpoint(above, below, 0)
 	if err != nil {
 		return err
 	}
@@ -540,7 +563,7 @@ func (s *Store) Move(id, above, below int64) error {
 	return nil
 }
 
-func (s *Store) midpoint(above, below int64) (float64, error) {
+func (s *Store) midpoint(above, below int64, attempt int) (float64, error) {
 	posOf := func(id int64) (float64, bool, error) {
 		if id == 0 {
 			return 0, false, nil
@@ -565,10 +588,13 @@ func (s *Store) midpoint(above, below int64) (float64, error) {
 	switch {
 	case hasHi && hasLo:
 		if lo-hi < rebalanceGap {
+			if attempt > 0 {
+				return 0, fmt.Errorf("positions %g and %g will not separate", hi, lo)
+			}
 			if err := s.rebalance(); err != nil {
 				return 0, err
 			}
-			return s.midpoint(above, below)
+			return s.midpoint(above, below, attempt+1)
 		}
 		return hi + (lo-hi)/2, nil
 	case hasHi:

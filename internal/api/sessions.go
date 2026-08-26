@@ -206,3 +206,93 @@ func plural(n int, one, many string) string {
 	}
 	return fmt.Sprintf("%d %s", n, many)
 }
+
+// handleExportAll writes the whole database out as text. A system of record you
+// cannot get out of is not a system of record -- this is the copy you keep, or
+// hand to whatever replaces this one.
+func (s *Server) handleExportAll(w http.ResponseWriter, r *http.Request) {
+	now := s.now()
+	sessions, err := s.store.Sessions(0)
+	if err != nil {
+		s.fail(w, err, "reading your captures")
+		return
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "todo — everything, exported %s\n", now.Format("Mon 2 Jan 2006, 15:04"))
+
+	loose, err := s.store.List(store.Query{View: store.ViewAll}, now)
+	if err != nil {
+		s.fail(w, err, "reading your tasks")
+		return
+	}
+	done, err := s.store.List(store.Query{View: store.ViewLogbook}, now)
+	if err != nil {
+		s.fail(w, err, "reading your logbook")
+		return
+	}
+	fmt.Fprintf(&b, "%s open, %s done, across %s\n",
+		plural(len(loose), "task", "tasks"),
+		plural(len(done), "task", "tasks"),
+		plural(len(sessions), "capture", "captures"))
+
+	for _, ses := range sessions {
+		tasks, err := s.store.List(store.Query{View: store.ViewAll, Batch: ses.ID}, now)
+		if err != nil {
+			s.fail(w, err, "reading a capture")
+			return
+		}
+		finished, err := s.store.List(store.Query{View: store.ViewLogbook, Batch: ses.ID}, now)
+		if err != nil {
+			s.fail(w, err, "reading a capture")
+			return
+		}
+		b.WriteString("\n" + strings.Repeat("─", 60) + "\n")
+		fmt.Fprintf(&b, "%s\n%s · %s\n\n",
+			cmp(ses.Title, untitled(ses.CreatedAt)),
+			ses.CreatedAt.Format("Mon 2 Jan 2006, 15:04"), ses.Source)
+
+		for _, t := range append(tasks, finished...) {
+			mark := "[ ]"
+			if t.Done() {
+				mark = "[x]"
+			}
+			fmt.Fprintf(&b, "  %s %s\n", mark, t.Title)
+			var bits []string
+			bits = append(bits, t.Topic)
+			if t.Due != nil {
+				bits = append(bits, "due "+t.Due.Format("2 Jan 2006"))
+			}
+			if t.Assignee != "" {
+				bits = append(bits, "@"+t.Assignee)
+			}
+			if t.Priority > 0 {
+				bits = append(bits, strings.ToLower(t.Priority.String()))
+			}
+			for _, tag := range t.Tags {
+				bits = append(bits, "#"+tag)
+			}
+			fmt.Fprintf(&b, "      %s\n", strings.Join(bits, " · "))
+			for _, n := range strings.Split(t.Note, "\n") {
+				if n != "" {
+					fmt.Fprintf(&b, "      | %s\n", n)
+				}
+			}
+			if t.Raw != "" {
+				fmt.Fprintf(&b, "      captured as: %s\n", t.Raw)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf("attachment; filename=todo-%s.txt", now.Format("2006-01-02")))
+	w.Write([]byte(b.String()))
+}
+
+func cmp(a, fallback string) string {
+	if a == "" {
+		return fallback
+	}
+	return a
+}

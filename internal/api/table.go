@@ -112,6 +112,10 @@ func (s *Server) handleTableCapture(w http.ResponseWriter, r *http.Request) {
 			"No row had anything in the column mapped to the task")
 		return
 	}
+	if err := checkBatchSize(len(tasks)); err != nil {
+		s.errorf(w, http.StatusUnprocessableEntity, "%s", err.Error())
+		return
+	}
 
 	source := body.Source
 	if source == "" {

@@ -55,6 +55,7 @@ func do(t *testing.T, srv *Server, method, path string, body, out any) int {
 	}
 	r := httptest.NewRequest(method, path, rdr)
 	r.Header.Set("Content-Type", "application/json")
+	r.Host = "127.0.0.1:8765" // httptest defaults to example.com, which the guard refuses
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, r)
 
@@ -607,5 +608,147 @@ func TestWhenFilter(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+// ── The guard ───────────────────────────────────────────────────────────────
+
+// raw sends a request without the test helper's loopback Host, so the guard is
+// exercised the way a browser would exercise it.
+func raw(t *testing.T, srv *Server, method, path, host, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(method, path, strings.NewReader(`{"draft":"admin | snuck in"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Host = host
+	if origin != "" {
+		r.Header.Set("Origin", origin)
+	}
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	return w
+}
+
+// TestGuardRefusesOtherSites covers the reason a server on 127.0.0.1 still
+// needs a door: the browser will happily carry another page's request to it.
+func TestGuardRefusesOtherSites(t *testing.T) {
+	srv, st := newServer(t)
+
+	for _, tc := range []struct {
+		name, host, origin string
+		want               int
+	}{
+		{"same origin", "127.0.0.1:8765", "http://127.0.0.1:8765", http.StatusOK},
+		{"localhost by name", "localhost:8765", "http://localhost:8765", http.StatusOK},
+		{"no origin at all", "127.0.0.1:8765", "", http.StatusOK},
+		{"another site", "127.0.0.1:8765", "https://evil.example", http.StatusForbidden},
+		// A page whose origin looks local but was served on another port is
+		// still not this app.
+		{"another local port", "127.0.0.1:8765", "http://127.0.0.1:9999", http.StatusForbidden},
+		// DNS rebinding: a name the attacker controls, resolved to loopback.
+		{"rebound hostname", "evil.example:8765", "http://evil.example:8765", http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := raw(t, srv, "POST", "/api/capture", tc.host, tc.origin)
+			if w.Code != tc.want {
+				t.Errorf("Host=%q Origin=%q gave %d, want %d", tc.host, tc.origin, w.Code, tc.want)
+			}
+		})
+	}
+
+	// Only the requests that were allowed should have written anything.
+	tasks, _ := st.List(store.Query{View: store.ViewAll}, now)
+	if len(tasks) != 3 {
+		t.Errorf("%d tasks were created; only the three allowed requests should have written",
+			len(tasks))
+	}
+}
+
+func TestGuardCapsTheBody(t *testing.T) {
+	srv, _ := newServer(t)
+	huge := strings.Repeat("admin | a very long line indeed\n", 400_000) // ~12 MiB
+	if code := do(t, srv, "POST", "/api/capture", map[string]string{"draft": huge}, nil); code == http.StatusOK {
+		t.Error("a body far past the limit was accepted")
+	}
+}
+
+func TestCaptureRefusesAnAbsurdNumberOfTasks(t *testing.T) {
+	srv, st := newServer(t)
+	var lines []string
+	for i := 0; i < maxPerCapture+1; i++ {
+		lines = append(lines, "admin | task")
+	}
+	code := do(t, srv, "POST", "/api/capture", map[string]string{"draft": strings.Join(lines, "\n")}, nil)
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("capture of %d tasks = %d, want 422", maxPerCapture+1, code)
+	}
+	if tasks, _ := st.List(store.Query{View: store.ViewAll}, now); len(tasks) != 0 {
+		t.Errorf("%d tasks were written despite the refusal", len(tasks))
+	}
+}
+
+func TestListIsCapped(t *testing.T) {
+	srv, st := newServer(t)
+	for range 3 {
+		var lines []string
+		for i := 0; i < 250; i++ {
+			lines = append(lines, "admin | task")
+		}
+		st.CreateBatch(parse.Parse(strings.Join(lines, "\n"), now).Tasks,
+			store.Capture{Source: "test"}, now)
+	}
+
+	var res ListResponse
+	do(t, srv, "GET", "/api/list?view=all", nil, &res)
+	if res.Total != 750 {
+		t.Errorf("total = %d, want the real count of 750", res.Total)
+	}
+	if res.Shown != listLimit || !res.Truncated {
+		t.Errorf("shown = %d truncated = %v, want %d and true", res.Shown, res.Truncated, listLimit)
+	}
+	if got := len(titles(res.Sections)); got != listLimit {
+		t.Errorf("%d tasks came back, want the response capped at %d", got, listLimit)
+	}
+}
+
+func TestUnknownApiPathIsJson(t *testing.T) {
+	srv, _ := newServer(t)
+	for _, tc := range []struct{ method, path string }{
+		{"GET", "/api/nope"},
+		{"DELETE", "/api/list"},
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		r.Host = "127.0.0.1:8765"
+		srv.ServeHTTP(w, r)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s %s = %d, want 404", tc.method, tc.path, w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "json") {
+			t.Errorf("%s %s returned %s; an API path must never answer with the client",
+				tc.method, tc.path, ct)
+		}
+	}
+}
+
+func TestBadDateNamesTheField(t *testing.T) {
+	srv, st := seeded(t)
+	all, _ := st.List(store.Query{View: store.ViewAll}, now)
+
+	r := httptest.NewRequest("PATCH", "/api/tasks/"+itoa(all[0].ID),
+		strings.NewReader(`{"title":"renamed","due":"wednesbury"}`))
+	r.Host = "127.0.0.1:8765"
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+
+	var body map[string]string
+	json.Unmarshal(w.Body.Bytes(), &body)
+	if body["field"] != "due" {
+		t.Errorf("error did not name the offending field: %v", body)
+	}
+	// Nothing is applied, so the interface can keep the draft and let the user
+	// correct one input rather than retype everything.
+	if got, _ := st.Get(all[0].ID); got.Title == "renamed" {
+		t.Error("a rejected patch applied part of itself")
 	}
 }

@@ -16,9 +16,10 @@ import (
 
 // Server routes the JSON API and, behind it, the built client.
 type Server struct {
-	store *store.Store
-	now   func() time.Time
-	mux   *http.ServeMux
+	store   *store.Store
+	now     func() time.Time
+	mux     *http.ServeMux
+	handler http.Handler
 }
 
 // New builds a server over st. now is injectable so tests can freeze the clock.
@@ -29,10 +30,13 @@ func New(st *store.Store, now func() time.Time, client http.Handler) *Server {
 	}
 	s := &Server{store: st, now: now, mux: http.NewServeMux()}
 	s.routes(client)
+	s.handler = guard(s.mux)
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
 
 func (s *Server) routes(client http.Handler) {
 	s.mux.HandleFunc("GET /api/list", s.handleList)
@@ -41,6 +45,7 @@ func (s *Server) routes(client http.Handler) {
 	s.mux.HandleFunc("POST /api/table/preview", s.handleTablePreview)
 	s.mux.HandleFunc("POST /api/table/capture", s.handleTableCapture)
 	s.mux.HandleFunc("GET /api/sessions", s.handleSessions)
+	s.mux.HandleFunc("GET /api/export", s.handleExportAll)
 	s.mux.HandleFunc("POST /api/sessions/{id}/rename", s.handleRenameSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/capture", s.handleCapture)
@@ -50,6 +55,10 @@ func (s *Server) routes(client http.Handler) {
 	s.mux.HandleFunc("POST /api/tasks/{id}/schedule", s.handleSchedule)
 	s.mux.HandleFunc("PATCH /api/tasks/{id}", s.handleUpdate)
 	s.mux.HandleFunc("DELETE /api/tasks/{id}", s.handleDelete)
+
+	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		s.errorf(w, http.StatusNotFound, "There is no %s %s.", r.Method, r.URL.Path)
+	})
 
 	if client != nil {
 		s.mux.Handle("/", client)
@@ -72,6 +81,17 @@ func (s *Server) fail(w http.ResponseWriter, err error, msg string) {
 	}
 	log.Printf("%s: %v", msg, err)
 	s.errorf(w, http.StatusInternalServerError, "%s.", msg)
+}
+
+// fieldError names the input that was refused, so the interface can mark it
+// rather than showing a sentence next to a form with nothing highlighted.
+func (s *Server) fieldError(w http.ResponseWriter, field, format string, args ...any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": fmt.Sprintf(format, args...),
+		"field": field,
+	})
 }
 
 func (s *Server) errorf(w http.ResponseWriter, code int, format string, args ...any) {
@@ -160,6 +180,23 @@ func (s *Server) meta(now time.Time) (Meta, error) {
 	return m, nil
 }
 
+// maxPerCapture is a sanity limit, not a quota. A paste this large is a mistake
+// -- a whole document instead of the meeting notes -- and silently creating
+// thousands of tasks is a worse outcome than refusing.
+const maxPerCapture = 500
+
+func checkBatchSize(n int) error {
+	if n > maxPerCapture {
+		return fmt.Errorf(
+			"that would create %d tasks, which looks like the wrong paste (the limit is %d)",
+			n, maxPerCapture)
+	}
+	return nil
+}
+
+// listLimit caps a single response. The count sent alongside is the real one.
+const listLimit = 500
+
 // ── handlers ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -176,9 +213,15 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		q.Sort = store.SortManual
 	}
 
+	q.Limit = listLimit
 	tasks, err := s.store.List(q, now)
 	if err != nil {
 		s.fail(w, err, "loading the list")
+		return
+	}
+	total, err := s.store.Count(q, now)
+	if err != nil {
+		s.fail(w, err, "counting the list")
 		return
 	}
 	meta, err := s.meta(now)
@@ -189,8 +232,10 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 
 	res := ListResponse{
 		View: string(q.View), Sort: string(q.Sort),
-		Sections: sections(tasks, q.View, q.Sort, now),
-		Total:    len(tasks),
+		Sections:  sections(tasks, q.View, q.Sort, now),
+		Total:     total,
+		Shown:     len(tasks),
+		Truncated: total > len(tasks),
 		CanDrag: q.Sort == store.SortManual && q.View != store.ViewUpcoming &&
 			q.View != store.ViewOverdue && q.View != store.ViewLogbook,
 		Meta: meta,
@@ -266,6 +311,10 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 	if len(res.Tasks) == 0 {
 		s.errorf(w, http.StatusUnprocessableEntity,
 			"No line contained a '|', so nothing was read as a task")
+		return
+	}
+	if err := checkBatchSize(len(res.Tasks)); err != nil {
+		s.errorf(w, http.StatusUnprocessableEntity, "%s", err.Error())
 		return
 	}
 	batch, err := s.store.CreateBatch(res.Tasks, store.Capture{Source: "web", Title: body.Title}, now)
@@ -380,7 +429,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		case due.Recognised:
 			p.Due = &due.Date
 		default:
-			s.errorf(w, http.StatusUnprocessableEntity, "%q is not a date I understand.", *body.Due)
+			s.fieldError(w, "due", "%q is not a date I understand.", *body.Due)
 			return
 		}
 	}

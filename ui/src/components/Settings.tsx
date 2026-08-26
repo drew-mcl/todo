@@ -70,6 +70,21 @@ export function Settings({
 
         <section>
           <h3 className="mb-1 font-mono text-2xs tracking-[0.14em] text-ink-4 uppercase">
+            your data
+          </h3>
+          <p className="mb-2 text-sm text-ink-4">
+            Everything, as plain text: every capture, what was said and when.
+          </p>
+          <a
+            href="/api/export"
+            className="inline-block rounded-md border border-line px-3 py-1.5 font-mono text-base text-ink-2 hover:border-ink-4 hover:text-ink"
+          >
+            export everything
+          </a>
+        </section>
+
+        <section>
+          <h3 className="mb-1 font-mono text-2xs tracking-[0.14em] text-ink-4 uppercase">
             show on each task
           </h3>
           <p className="mb-2 text-sm text-ink-4">
