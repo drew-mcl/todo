@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { api, type ListResponse, type Task } from "./api";
 import { useRoute } from "./lib/route";
 import { usePrefs } from "./lib/prefs";
+import { HueProvider } from "./lib/hues";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
@@ -304,7 +305,8 @@ export function App() {
   );
 
   return (
-    <div className="flex h-full">
+    <HueProvider topics={(meta?.topics ?? []).map((t) => t.name)}>
+      <div className="flex h-full">
       {prefs.sidebar && (
         <Sidebar
           meta={meta}
@@ -531,6 +533,7 @@ export function App() {
         setField={setField}
       />
       <Shortcuts open={overlay === "shortcuts"} onClose={() => setOverlay(null)} />
-    </div>
+      </div>
+    </HueProvider>
   );
 }

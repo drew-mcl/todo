@@ -3,8 +3,15 @@
 Paste your call notes. The action lines become tasks. Everything else is left alone.
 
 ```
-make build && ./todo serve --open
+git clone git@github.com:drew-mcl/todo.git && cd todo
+make && ./todo
 ```
+
+`todo` opens the terminal app. `todo serve --open` opens the web one. Both read
+the same database, so it does not matter which is in front of you.
+
+The built client is committed, so a clone needs **Go and nothing else** — no Node,
+no Swift. `make ui` rebuilds the web client if you change it.
 
 ## shorthand
 
@@ -94,13 +101,47 @@ day you actually planned.
 `j`/`k` move · `x` complete · `e` edit · `dd` delete · `u` undo
 `g` then `o` `u` `a` `d` to reach the narrower filters
 
+## the terminal app
+
+```
+todo            # or todo tui
+```
+
+Same lists, same grammar, same colours — a topic is the same dot in the terminal
+as it is in the browser, because both sides run the hash in
+`internal/palette`. It talks to SQLite directly, so it works whether or not the
+server is up.
+
+`n` opens the capture box, and every keystroke re-reads what you have written:
+your shorthand on one line, what it becomes on the next.
+
+```
+  2 TASKS · 1 NOTE · 1 SKIPPED
+  prod issue | chase the vendor about the patch | today @sam !!
+    chase the vendor about the patch  ● prod issue · today · sam · !!
+  > they have missed two dates
+    attached
+             | write the postmortem | eow #board
+    write the postmortem  ● prod issue · fri · #board
+  finance want the numbers before friday
+    no topic separator
+```
+
+`e` reopens a task as the line you originally wrote, rather than a form of
+separate fields — correct the shorthand and it is re-read.
+
+`n` capture · `⌃s` add · `j`/`k` move · `x` complete · `e` edit · `dd` delete
+`u` undo · `/` search · `t` today · `a` all · `l` logbook · `?` keys · `q` quit
+
 ## shape
 
 ```
-main.go              serve, add
-internal/parse       the shorthand grammar, dates, highlighting
+main.go              tui, serve, add
+internal/parse       the shorthand grammar, dates, tables, highlighting
 internal/store       SQLite via modernc — no CGO
+internal/palette     the colours, and which one a topic gets
 internal/api         JSON over the top of both
+internal/tui         the terminal app
 internal/ui          the built client, embedded
 ui/                  React + Vite + Tailwind
 ```

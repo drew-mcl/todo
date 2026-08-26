@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { topicColor, topicHue } from "../lib/topic";
+import { assignHues, topicColor, topicHue } from "../lib/topic";
 
 describe("topic colours", () => {
   it("gives a topic the same colour every time", () => {
@@ -13,6 +13,38 @@ describe("topic colours", () => {
       expect(hue).toBeGreaterThanOrEqual(0);
       expect(hue).toBeLessThan(8);
     }
+  });
+
+  // The identical table is asserted in internal/palette/palette_test.go. If
+  // either implementation drifts, one side fails and a topic stops being the
+  // same colour in the terminal as it is here.
+  it("agrees with the Go implementation", () => {
+    const pinned: Record<string, number> = {
+      "prod issue": 1,
+      admin: 4,
+      personal: 5,
+      platform: 2,
+      "some tool": 3,
+      board: 5,
+      inbox: 5,
+      "": 5,
+    };
+    for (const [topic, hue] of Object.entries(pinned)) {
+      expect(topicHue(topic)).toBe(hue);
+    }
+  });
+
+  it("gives every topic on screen a colour of its own", () => {
+    // board, inbox and personal all prefer hue 5.
+    const topics = ["prod issue", "admin", "personal", "platform", "some tool", "board"];
+    const hues = assignHues(topics);
+    expect(new Set(hues.values()).size).toBe(topics.length);
+  });
+
+  it("does not depend on the order it was given", () => {
+    const a = assignHues(["admin", "board", "personal"]);
+    const b = assignHues(["personal", "admin", "board"]);
+    for (const [k, v] of a) expect(b.get(k)).toBe(v);
   });
 
   it("points at a variable the stylesheet actually defines", () => {

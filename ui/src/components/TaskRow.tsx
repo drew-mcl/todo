@@ -3,18 +3,20 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "../api";
 import type { Fields } from "../lib/prefs";
-import { topicColor } from "../lib/topic";
+import { hueVar } from "../lib/topic";
+import { useHue } from "../lib/hues";
 import { Check } from "./Check";
 
 const BANGS = ["", "!", "!!", "!!!"];
 
 /** The dot that carries a topic's colour. */
 export function TopicDot({ topic, className }: { topic: string; className?: string }) {
+  const hue = useHue(topic);
   return (
     <span
       aria-hidden
       className={clsx("inline-block h-[6px] w-[6px] shrink-0 rounded-full", className)}
-      style={{ background: topicColor(topic) }}
+      style={{ background: hueVar(hue) }}
     />
   );
 }

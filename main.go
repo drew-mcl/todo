@@ -17,16 +17,19 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/drew-mcl/todo/internal/api"
 	"github.com/drew-mcl/todo/internal/parse"
 	"github.com/drew-mcl/todo/internal/store"
+	"github.com/drew-mcl/todo/internal/tui"
 	"github.com/drew-mcl/todo/internal/ui"
 )
 
 const usage = `todo -- capture meeting notes as tasks
 
 Usage:
-  todo serve [--port 8765] [--open]      start the web app
+  todo                                   the terminal app
+  todo serve [--port 8765] [--open]      the web app
   todo add   [text...]                   capture from the terminal or stdin
 
 Shorthand:
@@ -44,11 +47,14 @@ func main() {
 }
 
 func run(args []string) error {
+	// Bare `todo` opens the terminal app: the fastest thing to reach when you
+	// are already in a shell.
 	if len(args) == 0 {
-		fmt.Printf(usage, store.DefaultPath())
-		return nil
+		return runTUI(nil)
 	}
 	switch args[0] {
+	case "tui":
+		return runTUI(args[1:])
 	case "serve":
 		return serve(args[1:])
 	case "add":
@@ -59,6 +65,24 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q; try 'todo help'", args[0])
 	}
+}
+
+func runTUI(args []string) error {
+	fs := flag.NewFlagSet("tui", flag.ExitOnError)
+	dbPath := fs.String("db", store.DefaultPath(), "database file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := store.Open(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	p := tea.NewProgram(tui.New(st, time.Now), tea.WithAltScreen())
+	_, err = p.Run()
+	return err
 }
 
 func serve(args []string) error {
