@@ -17,9 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drew-mcl/todo/internal/api"
 	"github.com/drew-mcl/todo/internal/parse"
 	"github.com/drew-mcl/todo/internal/store"
-	"github.com/drew-mcl/todo/internal/web"
+	"github.com/drew-mcl/todo/internal/ui"
 )
 
 const usage = `todo -- capture meeting notes as tasks
@@ -75,10 +76,7 @@ func serve(args []string) error {
 	}
 	defer st.Close()
 
-	srv, err := web.New(st, time.Now)
-	if err != nil {
-		return err
-	}
+	srv := api.New(st, time.Now, ui.Handler())
 
 	// Loopback only. This is a personal list with no authentication in front of
 	// it, so it must never be reachable from the network.
@@ -113,6 +111,7 @@ func launch(url string) {
 func add(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	dbPath := fs.String("db", store.DefaultPath(), "database file")
+	title := fs.String("title", "", "name the call or meeting these came from")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -141,7 +140,7 @@ func add(args []string) error {
 	}
 	defer st.Close()
 
-	if _, err := st.CreateBatch(res.Tasks, "cli", now); err != nil {
+	if _, err := st.CreateBatch(res.Tasks, store.Capture{Source: "cli", Title: *title}, now); err != nil {
 		return err
 	}
 

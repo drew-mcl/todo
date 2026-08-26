@@ -60,6 +60,7 @@ type View string
 
 const (
 	ViewToday     View = "today"
+	ViewOverdue   View = "overdue"
 	ViewUpcoming  View = "upcoming"
 	ViewAnytime   View = "anytime"
 	ViewDelegated View = "delegated"
@@ -69,7 +70,9 @@ const (
 
 // Views is the sidebar order: the time-based lists, then who you are waiting on,
 // then everything open at once, then what is finished.
-var Views = []View{ViewToday, ViewUpcoming, ViewAnytime, ViewDelegated, ViewAll, ViewLogbook}
+var Views = []View{
+	ViewToday, ViewOverdue, ViewUpcoming, ViewAnytime, ViewDelegated, ViewAll, ViewLogbook,
+}
 
 // Title renders a view name for display.
 func (v View) Title() string {
@@ -94,7 +97,11 @@ func (v View) Valid() bool {
 func (v View) where(today string) (string, []any) {
 	switch v {
 	case ViewToday:
-		return "status = 'open' AND due_date IS NOT NULL AND due_date <= ?", []any{today}
+		// Exactly today. Late work has its own list and its own week-board tray,
+		// so it never squats on top of the day you actually planned.
+		return "status = 'open' AND due_date = ?", []any{today}
+	case ViewOverdue:
+		return "status = 'open' AND due_date IS NOT NULL AND due_date < ?", []any{today}
 	case ViewUpcoming:
 		return "status = 'open' AND due_date > ?", []any{today}
 	case ViewAnytime:
@@ -157,6 +164,9 @@ type Query struct {
 	Tag      string
 	Assignee string
 	Search   string
+	Batch    int64  // narrow to one capture session
+	From     string // ISO date: captured on or after
+	To       string // ISO date: captured on or before
 }
 
 const selectCols = `SELECT id, topic, title, note, due_date, assignee, priority, status,
@@ -183,6 +193,20 @@ func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
 		clauses = append(clauses, "assignee = ?")
 		args = append(args, q.Assignee)
 	}
+	if q.Batch > 0 {
+		clauses = append(clauses, "batch_id = ?")
+		args = append(args, q.Batch)
+	}
+	// When something was captured, which is how you find your way back to the
+	// call it was said on.
+	if q.From != "" {
+		clauses = append(clauses, "date(created_at) >= ?")
+		args = append(args, q.From)
+	}
+	if q.To != "" {
+		clauses = append(clauses, "date(created_at) <= ?")
+		args = append(args, q.To)
+	}
 	if q.Search != "" {
 		clauses = append(clauses, "(title LIKE ? OR note LIKE ? OR topic LIKE ?)")
 		like := "%" + q.Search + "%"
@@ -191,7 +215,7 @@ func (s *Store) List(q Query, now time.Time) ([]*Task, error) {
 
 	order := q.Sort.orderBy()
 	switch q.View {
-	case ViewUpcoming:
+	case ViewUpcoming, ViewOverdue:
 		order = "due_date ASC, position ASC"
 	case ViewLogbook:
 		order = "completed_at DESC"
@@ -279,6 +303,19 @@ func (s *Store) Counts(now time.Time) (map[View]int, error) {
 	return out, nil
 }
 
+// DoneOn counts what was completed on a given day, so Today can show progress
+// rather than only what is left.
+func (s *Store) DoneOn(day time.Time) (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		`SELECT count(*) FROM tasks WHERE status = 'done' AND date(completed_at) = ?`,
+		truncate(day).Format(dateLayout)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting what is done: %w", err)
+	}
+	return n, nil
+}
+
 // Group is a topic or tag with its open-task count, for the sidebar.
 type Group struct {
 	Name  string
@@ -323,9 +360,15 @@ func (s *Store) groups(query string) ([]Group, error) {
 	return out, rows.Err()
 }
 
+// Capture describes where a batch of tasks came from.
+type Capture struct {
+	Source string // web, cli, table, copilot
+	Title  string // the call or meeting it was taken in, when there was one
+}
+
 // CreateBatch stores a parsed paste as one undoable unit. New tasks land above
 // everything already in the list, keeping the order they were pasted in.
-func (s *Store) CreateBatch(tasks []*parse.Task, source string, now time.Time) (int64, error) {
+func (s *Store) CreateBatch(tasks []*parse.Task, c Capture, now time.Time) (int64, error) {
 	if len(tasks) == 0 {
 		return 0, errors.New("nothing to add")
 	}
@@ -336,7 +379,11 @@ func (s *Store) CreateBatch(tasks []*parse.Task, source string, now time.Time) (
 	defer tx.Rollback()
 
 	stamp := now.Format(time.RFC3339)
-	res, err := tx.Exec("INSERT INTO batches (created_at, source) VALUES (?, ?)", stamp, source)
+	if c.Source == "" {
+		c.Source = "web"
+	}
+	res, err := tx.Exec("INSERT INTO batches (created_at, source, title) VALUES (?, ?, ?)",
+		stamp, c.Source, strings.TrimSpace(c.Title))
 	if err != nil {
 		return 0, fmt.Errorf("creating batch: %w", err)
 	}
@@ -669,6 +716,18 @@ func (q Query) planFilter() (string, []any) {
 		clause += " AND id IN (SELECT task_id FROM tags WHERE tag = ?)"
 		args = append(args, q.Tag)
 	}
+	if q.Batch > 0 {
+		clause += " AND batch_id = ?"
+		args = append(args, q.Batch)
+	}
+	if q.From != "" {
+		clause += " AND date(created_at) >= ?"
+		args = append(args, q.From)
+	}
+	if q.To != "" {
+		clause += " AND date(created_at) <= ?"
+		args = append(args, q.To)
+	}
 	if q.Search != "" {
 		clause += " AND (title LIKE ? OR note LIKE ? OR topic LIKE ?)"
 		like := "%" + q.Search + "%"
@@ -705,4 +764,84 @@ func (s *Store) Schedule(id int64, date string) (*Task, error) {
 		return nil, fmt.Errorf("%q is not a date", date)
 	}
 	return s.Update(id, Patch{Due: &d})
+}
+
+// ── Sessions ────────────────────────────────────────────────────────────────
+
+// Session is one capture -- typically a call -- with how it has since gone.
+type Session struct {
+	ID        int64
+	Title     string
+	Source    string
+	CreatedAt time.Time
+	Total     int
+	Done      int
+}
+
+// Open reports how much of the session is still outstanding.
+func (s Session) Open() int { return s.Total - s.Done }
+
+// Sessions lists captures newest first, so a call can be found by when it
+// happened. Empty ones (everything undone since deleted) are left out.
+func (s *Store) Sessions(limit int) ([]Session, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`
+		SELECT b.id, b.title, b.source, b.created_at,
+		       count(t.id),
+		       sum(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END)
+		FROM batches b
+		JOIN tasks t ON t.batch_id = b.id
+		GROUP BY b.id
+		ORDER BY b.created_at DESC, b.id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Session
+	for rows.Next() {
+		var (
+			ses     Session
+			created string
+			done    sql.NullInt64
+		)
+		if err := rows.Scan(&ses.ID, &ses.Title, &ses.Source, &created, &ses.Total, &done); err != nil {
+			return nil, err
+		}
+		ses.Done = int(done.Int64)
+		if t, err := time.Parse(time.RFC3339, created); err == nil {
+			ses.CreatedAt = t
+		}
+		out = append(out, ses)
+	}
+	return out, rows.Err()
+}
+
+// Session returns one capture by id.
+func (s *Store) Session(id int64) (Session, error) {
+	all, err := s.Sessions(0)
+	if err != nil {
+		return Session{}, err
+	}
+	for _, ses := range all {
+		if ses.ID == id {
+			return ses, nil
+		}
+	}
+	return Session{}, ErrNotFound
+}
+
+// RenameSession retitles a capture after the fact.
+func (s *Store) RenameSession(id int64, title string) error {
+	res, err := s.db.Exec("UPDATE batches SET title = ? WHERE id = ?", strings.TrimSpace(title), id)
+	if err != nil {
+		return fmt.Errorf("renaming session %d: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

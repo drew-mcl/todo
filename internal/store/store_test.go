@@ -23,7 +23,7 @@ func open(t *testing.T) *Store {
 // handler uses.
 func seed(t *testing.T, s *Store, blob string) int64 {
 	t.Helper()
-	id, err := s.CreateBatch(parse.Parse(blob, now).Tasks, "test", now)
+	id, err := s.CreateBatch(parse.Parse(blob, now).Tasks, Capture{Source: "test"}, now)
 	if err != nil {
 		t.Fatalf("CreateBatch: %v", err)
 	}
@@ -103,7 +103,9 @@ func TestViews(t *testing.T) {
 		view View
 		want []string
 	}{
-		{ViewToday, []string{"overdue thing", "find out why alerts fired"}},
+		// Today is exactly today; what slipped has its own list.
+		{ViewToday, []string{"find out why alerts fired"}},
+		{ViewOverdue, []string{"overdue thing"}},
 		{ViewUpcoming, []string{"quarterly training"}},
 		{ViewAnytime, []string{"update the stale value", "book the dentist"}},
 		// Delegated is a filter, not a silo: these also appear above.

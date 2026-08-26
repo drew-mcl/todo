@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+/* Dark is resolved to an explicit attribute at boot, so CSS never has to reason
+   about the system preference and a forced choice is a single source of truth. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   INSTRUMENT
+
+   A precision tool for someone who thinks in a terminal. The shorthand grammar
+   is the product, so the interface is dense, monospaced where it matters, and
+   almost colourless -- which is what lets the few colours that remain actually
+   mean something.
+
+   Every value in the app comes from this file. There are no one-off sizes.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* ── Type ──
+     Seven steps, whole pixels. Mono carries identity: headings, the shorthand,
+     keys and numbers are all set in it. Sans is only for task prose. */
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --text-2xs: 11px;
+  --text-2xs--line-height: 15px;
+  --text-xs: 12px;
+  --text-xs--line-height: 17px;
+  --text-sm: 13px;
+  --text-sm--line-height: 19px;
+  --text-base: 14px;
+  --text-base--line-height: 21px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 17px;
+  --text-lg--line-height: 25px;
+  --text-xl: 22px;
+  --text-xl--line-height: 30px;
+  --text-2xl: 28px;
+  --text-2xl--line-height: 32px;
+
+  /* ── Space ── 4px base, so nothing lands between steps. */
+  --spacing: 4px;
+
+  /* ── Radii ── tight. An instrument is machined, not moulded. */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* ── Motion ── fast and deliberate; nothing floats. */
+  --ease-out-quick: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out-quick: cubic-bezier(.65, 0, .35, 1);
+
+  /* ── Semantic colour ──
+     Indirection through --c-* is what lets the whole app flip theme without a
+     second set of utilities. */
+  --color-bg: var(--c-bg);
+  --color-surface: var(--c-surface);
+  --color-raised: var(--c-raised);
+  --color-sunk: var(--c-sunk);
+
+  --color-line: var(--c-line);
+  --color-line-soft: var(--c-line-soft);
+
+  --color-ink: var(--c-ink);
+  --color-ink-2: var(--c-ink-2);
+  --color-ink-3: var(--c-ink-3);
+  --color-ink-4: var(--c-ink-4);
+
+  --color-accent: var(--c-accent);
+  --color-accent-soft: var(--c-accent-soft);
+  --color-danger: var(--c-danger);
+  --color-danger-soft: var(--c-danger-soft);
+
+  /* Topic hues. Assigned by a stable hash of the topic name, so a topic keeps
+     its colour for life and the list becomes scannable without a legend. */
+  --color-t0: var(--c-t0);
+  --color-t1: var(--c-t1);
+  --color-t2: var(--c-t2);
+  --color-t3: var(--c-t3);
+  --color-t4: var(--c-t4);
+  --color-t5: var(--c-t5);
+  --color-t6: var(--c-t6);
+  --color-t7: var(--c-t7);
+}
+
+/* ── Light ── a cool neutral ground, not cream. */
+:root {
+  --c-bg:      #FAFAFA;
+  --c-surface: #FFFFFF;
+  --c-raised:  #FFFFFF;
+  --c-sunk:    #F4F4F5;
+
+  --c-line:      #E4E4E7;
+  --c-line-soft: #EFEFF1;
+
+  --c-ink:   #18181B;
+  --c-ink-2: #35353C;
+  --c-ink-3: #5B5B64;
+  --c-ink-4: #83838D;
+
+  --c-accent:      #0E7490;
+  --c-accent-soft: #0E749018;
+  --c-danger:      #B4423A;
+  --c-danger-soft: #B4423A14;
+
+  --c-t0: #5B7FB9;
+  --c-t1: #3F8F86;
+  --c-t2: #6E8B4E;
+  --c-t3: #B07A33;
+  --c-t4: #B2634A;
+  --c-t5: #A85472;
+  --c-t6: #7A63B8;
+  --c-t7: #64748B;
+
+  --shadow-panel: 0 1px 2px rgb(24 24 27 / .04), 0 12px 32px -8px rgb(24 24 27 / .12);
+  --shadow-pop:   0 1px 2px rgb(24 24 27 / .06), 0 24px 56px -12px rgb(24 24 27 / .22);
+  color-scheme: light;
+}
+
+/* ── Dark ── near-black, never pure, so surfaces can layer above it. */
+[data-theme="dark"] {
+  --c-bg:      #0E0E10;
+  --c-surface: #161618;
+  --c-raised:  #1C1C1F;
+  --c-sunk:    #121214;
+
+  --c-line:      #27272A;
+  --c-line-soft: #1F1F22;
+
+  --c-ink:   #F4F4F5;
+  --c-ink-2: #CBCBD2;
+  --c-ink-3: #9A9AA4;
+  --c-ink-4: #70707A;
+
+  --c-accent:      #3BB0C4;
+  --c-accent-soft: #3BB0C420;
+  --c-danger:      #D97A70;
+  --c-danger-soft: #D97A7020;
+
+  --c-t0: #8FADE0;
+  --c-t1: #6FC4B8;
+  --c-t2: #A3C176;
+  --c-t3: #DCA85C;
+  --c-t4: #DE9179;
+  --c-t5: #DB90A8;
+  --c-t6: #A996E0;
+  --c-t7: #94A3B8;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / .5), 0 12px 32px -8px rgb(0 0 0 / .55);
+  --shadow-pop:   0 1px 2px rgb(0 0 0 / .6), 0 24px 56px -12px rgb(0 0 0 / .7);
+  color-scheme: dark;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────────
+   Inside @layer base on purpose. Unlayered CSS outranks everything Tailwind
+   puts in @layer utilities, so a bare `button { background: none }` here would
+   silently beat every bg-* class in the app. */
+
+@layer base {
+  * { box-sizing: border-box; min-width: 0; }
+
+  html, body, #root { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Headings, keys and the shorthand all share the mono face: the grammar is the
+     identity, so the typeface carries it rather than an ornament. */
+  h1, h2, h3 { font-family: var(--font-mono); font-weight: 500; margin: 0; }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+    border-radius: var(--radius-sm);
+  }
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+  }
+
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  input, textarea, select { font: inherit; color: inherit; }
+
+  ::selection { background: var(--color-accent-soft); }
+
+  /* A single scrollbar treatment, so no surface grows a chrome-coloured one. */
+  * { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: var(--color-ink-4); background-clip: content-box; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      transition-duration: .001ms !important;
+    }
+  }
+}

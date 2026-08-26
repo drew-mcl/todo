@@ -16,7 +16,13 @@ var schemaSQL string
 
 // migrations are applied in order; PRAGMA user_version records how far we got.
 // Append new statements, never edit an applied one.
-var migrations = []string{schemaSQL}
+var migrations = []string{
+	schemaSQL,
+
+	// A batch is really a capture session -- usually a call. Naming it makes the
+	// list a record of what was discussed and when, not just what is outstanding.
+	`ALTER TABLE batches ADD COLUMN title TEXT NOT NULL DEFAULT '';`,
+}
 
 // Store owns the database handle.
 type Store struct{ db *sql.DB }
