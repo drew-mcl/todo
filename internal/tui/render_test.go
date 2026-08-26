@@ -46,17 +46,40 @@ func screen(t *testing.T, keys ...string) (*Model, string) {
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
-		_, cmd := m.Update(msg)
-		// Commands here are synchronous reloads; run them so the view is current.
-		for cmd != nil {
-			out := cmd()
-			if out == nil {
-				break
-			}
-			_, cmd = m.Update(out)
-		}
+		m.run(msg)
 	}
 	return m, m.View()
+}
+
+// run feeds a message in and follows every command it produces, the way the
+// bubbletea runtime would. Batches have to be unwrapped by hand here: a test
+// that skips them quietly never runs the reload inside.
+func (m *Model) run(msg tea.Msg) {
+	_, cmd := m.Update(msg)
+	m.follow(cmd)
+}
+
+func (m *Model) follow(cmd tea.Cmd) { m.followN(cmd, 0) }
+
+func (m *Model) followN(cmd tea.Cmd, depth int) {
+	// Anything on a timer is left to the test. The animation tick reschedules
+	// itself for as long as something is moving, which with a frozen clock is
+	// forever; the linger would otherwise fire the instant it is scheduled and
+	// hide the very state it exists to show.
+	if cmd == nil || depth > 8 {
+		return
+	}
+	out := cmd()
+	switch v := out.(type) {
+	case nil, tickMsg, settledMsg:
+	case tea.BatchMsg:
+		for _, c := range v {
+			m.followN(c, depth+1)
+		}
+	default:
+		_, next := m.Update(out)
+		m.followN(next, depth+1)
+	}
 }
 
 func keyType(k string) tea.KeyType {
@@ -127,11 +150,79 @@ func TestCursorAndToggle(t *testing.T) {
 	}
 	before := m.current().Title
 
+	// Completing holds the row on screen, struck through, before it goes: the
+	// point is that finishing something looks like finishing something.
 	m2, out := screen(t, "j", "x")
-	text := plain(out)
-	if strings.Contains(text, before) && m2.view == store.ViewToday {
-		// Completing removes it from Today.
-		t.Errorf("%q is still in Today after x:\n%s", before, text)
+	if !strings.Contains(plain(out), before) {
+		t.Errorf("%q vanished instantly instead of being marked done:\n%s", before, plain(out))
+	}
+	if m2.leavingID == 0 {
+		t.Error("nothing was marked as on its way out")
+	}
+	if got, err := m2.store.Get(m2.leavingID); err != nil || !got.Done() {
+		t.Errorf("the task was not actually completed: %v", err)
+	}
+
+	// Once its moment is over, the list reloads without it.
+	m2.run(settledMsg{})
+	if strings.Contains(plain(m2.View()), before) {
+		t.Errorf("%q is still in Today after it settled:\n%s", before, plain(m2.View()))
+	}
+}
+
+// TestCompletionStopsAnimating guards the tick loop that drives the linger and
+// the meter: it has to stop when nothing is moving.
+func TestCompletionStopsAnimating(t *testing.T) {
+	clock := now
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.CreateBatch(parse.Parse(seed, now).Tasks, store.Capture{Source: "test"}, now)
+
+	m := New(st, func() time.Time { return clock })
+	m.Update(tea.WindowSizeMsg{Width: 92, Height: 28})
+	if msg := m.reload(); msg != nil {
+		m.Update(msg)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+
+	if !m.animating() {
+		t.Error("nothing is animating right after completing something")
+	}
+	clock = clock.Add(fade + time.Second)
+	m.leavingID = 0
+	if m.animating() {
+		t.Error("still animating long after everything settled")
+	}
+}
+
+// TestClearingTheDayIsSaidSo: the best thing that happens in here should not
+// read the same as a day that never had anything on it.
+func TestClearingTheDayIsSaidSo(t *testing.T) {
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.CreateBatch(parse.Parse("admin | the only thing | today", now).Tasks,
+		store.Capture{Source: "test"}, now)
+
+	m := New(st, func() time.Time { return now })
+	m.Update(tea.WindowSizeMsg{Width: 92, Height: 28})
+	if msg := m.reload(); msg != nil {
+		m.Update(msg)
+	}
+	m.run(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m.run(settledMsg{})
+
+	text := plain(m.View())
+	if !strings.Contains(text, "that is today done") {
+		t.Errorf("clearing the day says nothing:\n%s", text)
+	}
+	if strings.Contains(text, "nothing due today") {
+		t.Errorf("an emptied day reads like an empty one:\n%s", text)
 	}
 }
 
@@ -355,16 +446,7 @@ func TestSettleStopsTicking(t *testing.T) {
 func weekScreen(t *testing.T, keys ...string) (*Model, string) {
 	t.Helper()
 	m, _ := screen(t)
-	step := func(msg tea.Msg) {
-		_, cmd := m.Update(msg)
-		for cmd != nil {
-			out := cmd()
-			if out == nil {
-				return
-			}
-			_, cmd = m.Update(out)
-		}
-	}
+	step := m.run
 	step(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
 	for _, k := range keys {
 		if k == "esc" {
@@ -420,14 +502,7 @@ func TestWeekSchedulesByKey(t *testing.T) {
 	}
 
 	// 5 is the fifth day of the week on screen: Friday 28 August.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
-	for cmd != nil {
-		out := cmd()
-		if out == nil {
-			break
-		}
-		_, cmd = m.Update(out)
-	}
+	m.run(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
 
 	got, err := m.store.Get(target.ID)
 	if err != nil {
@@ -443,14 +518,7 @@ func TestWeekSchedulesByKey(t *testing.T) {
 			m.cursor = i
 		}
 	}
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("0")})
-	for cmd != nil {
-		out := cmd()
-		if out == nil {
-			break
-		}
-		_, cmd = m.Update(out)
-	}
+	m.run(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("0")})
 	if got, _ := m.store.Get(target.ID); got.Due != nil {
 		t.Errorf("due = %v, want it cleared", got.Due)
 	}
@@ -487,5 +555,30 @@ func TestCaptureReturnsWhereItCameFrom(t *testing.T) {
 	m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m2.mode != modeList {
 		t.Errorf("esc from the list went to %v, want the list", m2.mode)
+	}
+}
+
+// TestSearchNarrowsAsYouType: waiting for enter makes a list feel like a form.
+func TestSearchNarrowsAsYouType(t *testing.T) {
+	m, _ := screen(t, "a") // everything, so there is something to narrow
+	step := m.run
+
+	before := len(m.flat)
+	step(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "dentist" {
+		step(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	if len(m.flat) >= before {
+		t.Errorf("the list did not narrow while typing: %d then %d", before, len(m.flat))
+	}
+	if len(m.flat) != 1 || !strings.Contains(m.flat[0].Title, "dentist") {
+		t.Errorf("narrowed to %v", m.flat)
+	}
+
+	// Escape puts it all back.
+	step(tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.flat) != before {
+		t.Errorf("esc left %d of %d", len(m.flat), before)
 	}
 }

@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { motion } from "motion/react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "../api";
@@ -134,15 +135,22 @@ export function TaskRow({
     useSortable({ id: task.id, disabled: !draggable });
 
   return (
-    <li
+    <motion.li
       ref={setNodeRef}
+      layout="position"
+      // Completing something should look like completing something: the row is
+      // already struck through by the optimistic update, and folding away is
+      // what makes it feel finished rather than merely gone.
+      exit={{ opacity: 0, height: 0, marginTop: 0, paddingTop: 0, paddingBottom: 0 }}
+      transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       data-task-id={task.id}
       className={clsx(
-        "group/row relative flex items-start gap-2.5 border-b border-line-soft pr-2",
+        "group/row relative flex items-start gap-2.5 overflow-hidden border-b border-line-soft pr-2",
         compact ? "py-1.5" : "py-2.5",
         isDragging && "z-10 opacity-40",
         cursor && "bg-sunk",
+        task.done && "opacity-60",
       )}
     >
       {/* The keyboard cursor is a mark in the gutter, so it never competes with
@@ -197,6 +205,6 @@ export function TaskRow({
           {BANGS[task.priority]}
         </span>
       )}
-    </li>
+    </motion.li>
   );
 }

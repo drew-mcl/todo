@@ -149,6 +149,10 @@ scheduling is a keystroke instead of a drag — which turns out to be faster:
 `n` capture · `⌃s` add · `j`/`k` move · `x` complete · `e` edit · `dd` delete
 `u` undo · `/` search · `t` today · `w` week · `a` all · `l` logbook · `?` keys
 
+Search narrows as you type. Completing something holds it on screen, struck
+through, before it folds away — and when the last thing today goes, the day
+says so rather than reading like a day that never had anything on it.
+
 ## shape
 
 ```

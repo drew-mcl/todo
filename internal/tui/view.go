@@ -99,8 +99,11 @@ func (m *Model) header() string {
 	open := m.counts[store.ViewToday]
 	right := styFaint.Render(strings.ToLower(now.Format("Mon 2 January")))
 	if m.view == store.ViewToday && open+m.doneToday > 0 {
-		right = styFaint.Render(fmt.Sprintf("%s · %d of %d done",
-			strings.ToLower(now.Format("Mon 2 January")), m.doneToday, open+m.doneToday))
+		// The date still earns its place; the meter joins it rather than
+		// replacing it.
+		right = styFaint.Render(strings.ToLower(now.Format("Mon 2 January"))) + "  " +
+			m.meterBar(10) + "  " +
+			styFaint.Render(fmt.Sprintf("%d of %d done", m.doneToday, open+m.doneToday))
 	}
 
 	gap := m.width - 4 - lipgloss.Width(left) - lipgloss.Width(right)
@@ -110,12 +113,25 @@ func (m *Model) header() string {
 	return gutter + left + strings.Repeat(" ", gap) + right + "\n" + gutter + m.rule()
 }
 
+// meterBar draws the day's progress. It travels rather than jumping, which is
+// the difference between a number changing and something being finished.
+func (m *Model) meterBar(width int) string {
+	filled := int(m.meterNow()*float64(width) + 0.5)
+	filled = min(max(filled, 0), width)
+	return styAccent.Render(strings.Repeat("━", filled)) +
+		styRule.Render(strings.Repeat("━", width-filled))
+}
+
 // listLines draws the whole list and reports which line the cursor sits on, so
 // the caller can scroll to it.
 func (m *Model) listLines() ([]string, int) {
 	if len(m.flat) == 0 {
 		line, hint := m.emptyWords()
-		return []string{"", gutter + styDim.Render(line), gutter + styFaint.Render(hint)}, 0
+		lead := styDim.Render(line)
+		if m.view == store.ViewToday && m.doneToday > 0 {
+			lead = styAccent.Render("✓ ") + styTitle.Render(line)
+		}
+		return []string{"", gutter + lead, gutter + styFaint.Render(hint)}, 0
 	}
 
 	var out []string
@@ -152,7 +168,9 @@ func (m *Model) taskLines(t *store.Task, selected bool) []string {
 	box := styFaint.Render(hollow)
 	title := styTitle.Render(truncate(t.Title, m.width-12))
 	if t.Done() {
-		box = styDim.Render(bullet)
+		// Accent, not grey: a finished thing should look finished for the
+		// moment it is still on screen.
+		box = styAccent.Render(bullet)
 		title = styDone.Render(truncate(t.Title, m.width-12))
 	}
 
@@ -201,6 +219,12 @@ func (m *Model) metaLine(t *store.Task) string {
 func (m *Model) emptyWords() (string, string) {
 	switch m.view {
 	case store.ViewToday:
+		// The best thing that happens in here used to read the same as a day
+		// that never had anything on it.
+		if m.doneToday > 0 {
+			return "that is today done.",
+				fmt.Sprintf("%d closed. nothing else is owed today.", m.doneToday)
+		}
 		return "nothing due today.", "press n and paste what came up on the call."
 	case store.ViewOverdue:
 		return "nothing has slipped.", "everything with a date is still ahead of you."

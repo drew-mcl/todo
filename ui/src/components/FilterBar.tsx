@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
 import { WHEN, type Filters, type Meta } from "../api";
@@ -129,12 +130,41 @@ export function FilterRow({
   );
 }
 
+/**
+ * Counts up rather than jumping. Closing something is the moment worth marking,
+ * and a number that ticks over says it happened.
+ */
+function useCountUp(target: number, ms = 400) {
+  const [n, setN] = useState(target);
+  const from = useRef(target);
+
+  useEffect(() => {
+    const start = performance.now();
+    const a = from.current;
+    if (a === target) return;
+    let raf = 0;
+    const step = (t: number) => {
+      const p = Math.min(1, (t - start) / ms);
+      // Same ease as everything else that moves.
+      const eased = 1 - Math.pow(1 - p, 3);
+      setN(Math.round(a + (target - a) * eased));
+      if (p < 1) raf = requestAnimationFrame(step);
+      else from.current = target;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+
+  return n;
+}
+
 /** The day's own header: the date, and how much of it you have closed. */
 export function DayHeader({ meta }: { meta?: Meta }) {
-  if (!meta) return null;
-  const left = meta.counts.today ?? 0;
-  const done = meta.doneToday ?? 0;
+  const left = meta?.counts.today ?? 0;
+  const done = meta?.doneToday ?? 0;
   const total = left + done;
+  const shown = useCountUp(done);
+  if (!meta) return null;
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
 
   return (
@@ -146,11 +176,11 @@ export function DayHeader({ meta }: { meta?: Meta }) {
             className="h-full rounded-full bg-accent"
             initial={false}
             animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
         <p className="font-mono text-xs whitespace-nowrap text-ink-4">
-          {total === 0 ? "nothing due" : `${done} of ${total} done`}
+          {total === 0 ? "nothing due" : `${shown} of ${total} done`}
         </p>
       </div>
     </div>

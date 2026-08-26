@@ -20,6 +20,9 @@ import { Calls } from "./components/Calls";
 
 type Overlay = "capture" | "palette" | "settings" | "shortcuts" | null;
 
+/** How long a completed task stays struck through before it folds away. */
+const LINGER = 700;
+
 // g-chords reach the narrowing filters; the four places you live have a plain
 // key of their own.
 const JUMPS: Record<string, string> = {
@@ -41,6 +44,7 @@ export function App() {
   const [problem, setProblem] = useState<string>();
   const [searching, setSearching] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [draftQuery, setDraftQuery] = useState(route.filters.q ?? "");
   const searchRef = useRef<HTMLInputElement>(null);
   const chord = useRef<string | null>(null);
 
@@ -105,7 +109,10 @@ export function App() {
       if (ctx?.previous) qc.setQueryData(["list", filters], ctx.previous);
       onFailed(e);
     },
-    onSettled: refresh,
+    // Held back on purpose. The optimistic update has already struck the row
+    // through; refetching at once would whip it off the page before that
+    // registered as anything.
+    onSettled: () => setTimeout(refresh, LINGER),
   });
   const schedule = useMutation({
     mutationFn: ({ id, date }: { id: number; date: string }) => api.schedule(id, date),
@@ -163,7 +170,7 @@ export function App() {
         if (detail) return setDetail(undefined);
         if (searching) {
           setSearching(false);
-          if (filters.q) go("list", { ...filters, q: "" });
+          setDraftQuery("");
           return;
         }
         if (typing) (target as HTMLElement).blur();
@@ -290,6 +297,12 @@ export function App() {
   }, [undo]);
 
   useEffect(() => {
+    if (draftQuery === (filters.q ?? "")) return;
+    const id = setTimeout(() => go(route.kind, { ...filters, q: draftQuery }), 160);
+    return () => clearTimeout(id);
+  }, [draftQuery, filters, route.kind, go]);
+
+  useEffect(() => {
     if (!problem) return;
     const id = setTimeout(() => setProblem(undefined), 6_000);
     return () => clearTimeout(id);
@@ -351,12 +364,9 @@ export function App() {
             {(searching || filters.q) && (
               <input
                 ref={searchRef}
-                defaultValue={filters.q}
+                value={draftQuery}
                 placeholder="search"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter")
-                    go(route.kind, { ...filters, q: (e.target as HTMLInputElement).value });
-                }}
+                onChange={(e) => setDraftQuery(e.target.value)}
                 className="w-52 rounded-md border border-line bg-surface px-2.5 py-1.5 font-mono text-base outline-none focus:border-accent"
               />
             )}

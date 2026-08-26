@@ -7,6 +7,8 @@ import {
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import clsx from "clsx";
+import { AnimatePresence, motion } from "motion/react";
 import type { ListResponse, Task } from "../api";
 import type { Fields } from "../lib/prefs";
 import { TaskRow } from "./TaskRow";
@@ -47,12 +49,26 @@ export function TaskList({
   const flat = data.sections.flatMap((s) => s.tasks);
 
   if (flat.length === 0) {
+    // Clearing the day is the best thing that happens in here, and it used to
+    // say the same flat sentence as a day that never had anything on it.
+    const cleared = data.view === "today" && !filtered && (data.meta.doneToday ?? 0) > 0;
     const [line, hint] = filtered
       ? ["nothing matches that filter.", "clear it to see the whole list."]
-      : (EMPTY[data.view] ?? EMPTY.all);
+      : cleared
+        ? ["that is today done.", `${data.meta.doneToday} closed. nothing else is owed today.`]
+        : (EMPTY[data.view] ?? EMPTY.all);
+
     return (
-      <div className="pt-16">
-        <p className="text-lg text-ink-2">{line}</p>
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+        className="pt-16"
+      >
+        <p className={clsx("text-lg", cleared ? "text-ink" : "text-ink-2")}>
+          {cleared && <span className="mr-2 text-accent">✓</span>}
+          {line}
+        </p>
         <p className="mt-1.5 font-mono text-base text-ink-4">
           {hint}{" "}
           {filtered && (
@@ -61,7 +77,7 @@ export function TaskList({
             </button>
           )}
         </p>
-      </div>
+      </motion.div>
     );
   }
 
@@ -94,6 +110,7 @@ export function TaskList({
               </h2>
             )}
             <ul>
+              <AnimatePresence initial={false}>
               {section.tasks.map((task) => (
                 <TaskRow
                   key={task.id}
@@ -107,6 +124,7 @@ export function TaskList({
                   onFilter={onFilter}
                 />
               ))}
+              </AnimatePresence>
             </ul>
           </section>
         ))}

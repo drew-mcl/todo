@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/drew-mcl/todo/internal/store"
 )
 
 // The capture box re-reads the draft on every keystroke, which means a finished
@@ -99,3 +100,75 @@ func dimmed(p float64) lipgloss.Style {
 // visible reports whether a decoration has arrived yet. The topic dot lands
 // last, which is what makes the line look assembled rather than faded.
 func visible(p float64) bool { return p > 0.55 }
+
+// linger is how long a completed task stays on screen, struck through, before
+// it folds away. Long enough to register, short enough not to be in the way.
+const linger = 650 * time.Millisecond
+
+// fade is how long a message sits in the status bar before it goes quiet.
+const fade = 6 * time.Second
+
+// meterFill is how long the day meter takes to travel.
+const meterFill = 450 * time.Millisecond
+
+// ease is the same curve everything else moves on.
+func ease(p float64) float64 {
+	if p >= 1 {
+		return 1
+	}
+	if p <= 0 {
+		return 0
+	}
+	q := 1 - p
+	return 1 - q*q*q
+}
+
+// meterNow is where the day meter has travelled to. It eases from wherever it
+// was when the count last changed towards where it is going.
+func (m *Model) meterNow() float64 {
+	target := m.meterTarget()
+	if m.meterAt.IsZero() {
+		return target
+	}
+	p := ease(float64(m.now().Sub(m.meterAt)) / float64(meterFill))
+	return m.meter + (target-m.meter)*p
+}
+
+func (m *Model) meterTarget() float64 {
+	total := m.counts[store.ViewToday] + m.doneToday
+	if total == 0 {
+		return 0
+	}
+	return float64(m.doneToday) / float64(total)
+}
+
+// animating reports whether anything on screen is still moving, and so whether
+// the tick loop needs to keep running. Nothing moving costs nothing.
+func (m *Model) animating() bool {
+	now := m.now()
+	if m.mode == modeCapture && m.anim.running(now) {
+		return true
+	}
+	if m.leavingID != 0 && now.Sub(m.leavingAt) < linger {
+		return true
+	}
+	if !m.meterAt.IsZero() && now.Sub(m.meterAt) < meterFill {
+		return true
+	}
+	if m.flash != "" && now.Sub(m.flashAt) < fade {
+		return true
+	}
+	return false
+}
+
+// message is what the status bar has to say, if anything, having gone quiet
+// once it has been read.
+func (m *Model) message() (string, bool) {
+	if m.problem != "" {
+		return m.problem, false
+	}
+	if m.flash != "" && m.now().Sub(m.flashAt) < fade {
+		return m.flash, true
+	}
+	return "", true
+}

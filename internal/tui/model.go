@@ -64,6 +64,16 @@ type Model struct {
 	plan      *store.Plan
 	weekStart time.Time
 
+	// A completed task is held on screen, struck through, before it goes.
+	leavingID int64
+	leavingAt time.Time
+
+	// The day meter fills rather than jumping, and a message fades rather than
+	// sitting there until something else replaces it.
+	meterAt time.Time
+	meter   float64
+	flashAt time.Time
+
 	lastBatch int64
 	flash     string
 	problem   string
@@ -165,6 +175,7 @@ func (m *Model) current() *store.Task {
 
 func (m *Model) say(format string, args ...any) {
 	m.flash = fmt.Sprintf(format, args...)
+	m.flashAt = m.now()
 	m.problem = ""
 }
 

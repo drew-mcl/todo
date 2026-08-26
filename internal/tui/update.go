@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,15 +42,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.sections, m.flat = msg.sections, msg.flat
-		m.hues, m.counts, m.doneToday = msg.hues, msg.counts, msg.doneToday
+		m.hues, m.counts = msg.hues, msg.counts
+		if msg.doneToday != m.doneToday {
+			// Start the meter travelling from where it currently sits.
+			m.meter, m.meterAt = m.meterNow(), m.now()
+			m.doneToday = msg.doneToday
+		}
 		if m.cursor >= len(m.flat) {
 			m.cursor = max(0, len(m.flat)-1)
 		}
-		return m, nil
+		return m, tick()
+
+	case settledMsg:
+		m.leavingID = 0
+		if m.mode == modeWeek {
+			return m, m.loadWeek
+		}
+		return m, m.reload
 
 	case tickMsg:
-		// Only runs while something is settling; it stops on its own.
-		if m.mode == modeCapture && m.anim.running(m.now()) {
+		// Runs only while something is moving, and stops on its own.
+		if m.animating() {
 			return m, tick()
 		}
 		return m, nil
@@ -87,10 +100,10 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.onSearch {
 		switch msg.String() {
 		case "enter":
+			// Already filtered; enter just puts the keys back on the list.
 			m.onSearch = false
 			m.search.Blur()
-			m.q = m.search.Value()
-			return m, m.reload
+			return m, nil
 		case "esc":
 			m.onSearch = false
 			m.search.Blur()
@@ -98,8 +111,14 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.q = ""
 			return m, m.reload
 		}
+
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
+		// Narrow as you type. Waiting for enter makes a list feel like a form.
+		if q := m.search.Value(); q != m.q {
+			m.q, m.cursor = q, 0
+			return m, tea.Batch(cmd, m.reload)
+		}
 		return m, cmd
 	}
 
@@ -208,17 +227,38 @@ func rawOf(t *store.Task) string {
 	return b.String()
 }
 
+// toggleCurrent completes a task and then leaves it alone for a moment. The row
+// is already struck through; reloading at once would whip it off the screen
+// before that registered as anything.
 func (m *Model) toggleCurrent() tea.Cmd {
 	t := m.current()
 	if t == nil {
 		return nil
 	}
-	if _, err := m.store.Toggle(t.ID, m.now()); err != nil {
+	updated, err := m.store.Toggle(t.ID, m.now())
+	if err != nil {
 		m.failed(err)
 		return nil
 	}
-	return m.reload
+	// Swap the local copy so it draws as done without a round trip.
+	for i, x := range m.flat {
+		if x.ID == updated.ID {
+			m.flat[i] = updated
+		}
+	}
+	for si := range m.sections {
+		for ti, x := range m.sections[si].Tasks {
+			if x.ID == updated.ID {
+				m.sections[si].Tasks[ti] = updated
+			}
+		}
+	}
+	m.leavingID, m.leavingAt = updated.ID, m.now()
+	return tea.Batch(tick(), tea.Tick(linger, func(time.Time) tea.Msg { return settledMsg{} }))
 }
+
+// settledMsg arrives once a completed task has had its moment.
+type settledMsg struct{}
 
 func (m *Model) deleteCurrent() tea.Cmd {
 	t := m.current()

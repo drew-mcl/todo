@@ -184,7 +184,10 @@ export function TableInput({
         )}
       </div>
 
-      <footer className="flex shrink-0 items-center gap-x-5 border-t border-line-soft px-6 py-3">
+      <footer className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-line-soft px-6 py-3">
+        <p className="font-mono text-xs text-ink-4">
+          columns are guessed from the headers — change any that read wrong
+        </p>
         <button
           onClick={commit}
           disabled={!preview?.tasks || busy}

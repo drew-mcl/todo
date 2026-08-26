@@ -275,6 +275,17 @@ export function Capture({
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-line-soft px-6 py-3">
+              <code className="font-mono text-xs text-ink-4">
+                <span className="font-medium text-ink-2">topic</span>
+                <span> | </span>what needs doing<span> | </span>
+                <span className="text-accent">today</span> <span className="text-t0">@who</span>{" "}
+                <span className="text-danger">!!</span> <span className="text-t2">#tag</span>{" "}
+                <span className="italic">&gt; note</span>
+              </code>
+              <span className="font-mono text-xs text-ink-4">
+                start a line with <span className="font-semibold text-ink-2">|</span> to repeat
+                the topic above
+              </span>
               {error && <span className="font-mono text-xs text-danger">{error}</span>}
               <div className="ml-auto flex items-center gap-2">
                 <button
