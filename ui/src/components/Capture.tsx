@@ -4,6 +4,15 @@ import { AnimatePresence, motion } from "motion/react";
 import { api, type PreviewResponse, type Token, type TokenKind } from "../api";
 import { draftStore } from "../lib/prefs";
 import { TopicDot } from "./TaskRow";
+import { TableInput } from "./TableInput";
+
+type Mode = "shorthand" | "table" | "copilot";
+
+const MODES: { id: Mode; label: string; hint: string }[] = [
+  { id: "shorthand", label: "shorthand", hint: "type or paste your notes" },
+  { id: "table", label: "table", hint: "paste a tracker or spreadsheet" },
+  { id: "copilot", label: "copilot", hint: "paste the summary from Teams" },
+];
 
 /** Colour is spent here because here it is teaching the grammar. */
 const TOKEN: Record<TokenKind, string> = {
@@ -127,6 +136,8 @@ export function Capture({
   onClose: () => void;
   onAdded: (batchId: number, added: number) => void;
 }) {
+  const [mode, setMode] = useState<Mode>("shorthand");
+  const [title, setTitle] = useState("");
   const [draft, setDraft] = useState(() => draftStore.read());
   const [preview, setPreview] = useState<PreviewResponse>();
   const [busy, setBusy] = useState(false);
@@ -134,11 +145,11 @@ export function Capture({
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || mode !== "shorthand") return;
     const el = ref.current;
     el?.focus();
     el?.setSelectionRange(el.value.length, el.value.length);
-  }, [open]);
+  }, [open, mode]);
 
   // The parse is debounced but always server-side: one parser, and this is it.
   useEffect(() => {
@@ -159,7 +170,7 @@ export function Capture({
     setBusy(true);
     setError(undefined);
     try {
-      const { batchId, added } = await api.capture(draft);
+      const { batchId, added } = await api.capture(draft, title);
       draftStore.clear();
       setDraft("");
       setPreview(undefined);
@@ -198,14 +209,55 @@ export function Capture({
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             className="flex h-full w-full max-w-[960px] flex-col border-x border-line bg-surface shadow-[var(--shadow-pop)]"
           >
-            <header className="flex shrink-0 items-baseline justify-between border-b border-line-soft px-6 py-3">
-              <h2 className="text-base text-ink">capture</h2>
-              <p className="font-mono text-xs text-ink-4">
+            <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-soft px-6 py-3">
+              {/* Naming the call is what turns a pile of tasks into a record you
+                  can come back to and send on afterwards. */}
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="name this call (optional)"
+                className="min-w-0 flex-1 bg-transparent font-mono text-md text-ink outline-none placeholder:text-ink-4"
+              />
+              <div className="flex gap-0.5 rounded-md border border-line bg-sunk p-0.5">
+                {MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMode(m.id)}
+                    title={m.hint}
+                    className={clsx(
+                      "rounded-sm px-2.5 py-1 font-mono text-xs transition-colors",
+                      mode === m.id ? "bg-raised text-ink" : "text-ink-3 hover:text-ink",
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <p className="font-mono text-xs whitespace-nowrap text-ink-4">
                 <kbd className="rounded-xs border border-line px-1">⌘</kbd>
-                <kbd className="ml-px rounded-xs border border-line px-1">↵</kbd> to add ·{" "}
-                <kbd className="rounded-xs border border-line px-1">esc</kbd> to close — draft is kept
+                <kbd className="ml-px rounded-xs border border-line px-1">↵</kbd> add ·{" "}
+                <kbd className="rounded-xs border border-line px-1">esc</kbd> close
               </p>
             </header>
+
+            {mode !== "shorthand" ? (
+              <TableInput
+                key={mode}
+                source={mode === "copilot" ? "copilot" : "table"}
+                topic={title}
+                title={title}
+                placeholder={
+                  mode === "copilot"
+                    ? "Paste the action items table from Teams Copilot.\n\n| Action | Owner | Deadline | Notes |\n| --- | --- | --- | --- |\n| Chase the vendor | Sam | Friday | Missed two dates |"
+                    : "Paste a table — from a spreadsheet, a markdown table, or CSV.\n\nIssue\tPlan\tOwner\tDue date\nIngest lag\tDecide on the fix\tsam\t+3d"
+                }
+                onCommitted={(batchId, added) => {
+                  onAdded(batchId, added);
+                  onClose();
+                }}
+              />
+            ) : (
+            <>
 
             <textarea
               ref={ref}
@@ -219,7 +271,7 @@ export function Capture({
                 }
               }}
               placeholder={
-                "Paste your notes. Lines with a | become tasks, everything else is left alone.\n\nprod issue | chase the vendor about the patch | today @sam !!\n> they have missed two dates now\n\"          | write the postmortem | eow #board"
+                "Paste your notes. Lines with a | become tasks, everything else is left alone.\n\nprod issue | chase the vendor about the patch | today @sam !!\n> they have missed two dates now\n           | write the postmortem | eow #board"
               }
               className="min-h-[180px] flex-1 resize-none bg-transparent px-6 py-4 font-mono text-md leading-[1.8] text-ink outline-none placeholder:text-ink-4"
             />
@@ -237,7 +289,8 @@ export function Capture({
                 <span className="italic">&gt; note</span>
               </code>
               <span className="font-mono text-xs text-ink-4">
-                <span className="font-semibold text-ink-2">"</span> repeats the topic above
+                start a line with <span className="font-semibold text-ink-2">|</span> to repeat
+                the topic above
               </span>
               {error && <span className="font-mono text-xs text-danger">{error}</span>}
               <div className="ml-auto flex items-center gap-2">
@@ -258,6 +311,8 @@ export function Capture({
                 </button>
               </div>
             </footer>
+            </>
+            )}
           </motion.div>
         </motion.div>
       )}

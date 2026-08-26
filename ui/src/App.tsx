@@ -14,15 +14,18 @@ import { Palette } from "./components/Palette";
 import { Settings } from "./components/Settings";
 import { Shortcuts } from "./components/Shortcuts";
 import { Select } from "./components/Select";
+import { FilterButton, FilterRow, DayHeader, OverdueNudge } from "./components/FilterBar";
+import { Calls } from "./components/Calls";
 
 type Overlay = "capture" | "palette" | "settings" | "shortcuts" | null;
 
+// g-chords reach the narrowing filters; the four places you live have a plain
+// key of their own.
 const JUMPS: Record<string, string> = {
-  t: "today",
+  o: "overdue",
   u: "upcoming",
   a: "anytime",
   d: "delegated",
-  l: "logbook",
 };
 
 export function App() {
@@ -35,16 +38,18 @@ export function App() {
   const [cursor, setCursor] = useState(0);
   const [undo, setUndo] = useState<{ batchId: number; added: number }>();
   const [searching, setSearching] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const chord = useRef<string | null>(null);
 
   const isWeek = route.kind === "week";
+  const isCalls = route.kind === "calls";
   const filters = route.filters;
 
   const list = useQuery({
     queryKey: ["list", filters],
     queryFn: () => api.list(filters),
-    enabled: !isWeek,
+    enabled: !isWeek && !isCalls,
   });
   const week = useQuery({
     queryKey: ["week", filters],
@@ -53,6 +58,7 @@ export function App() {
   });
 
   const meta = (isWeek ? week.data?.meta : list.data?.meta) ?? undefined;
+  const overdueCount = meta?.counts.overdue ?? 0;
   const flat = useMemo(
     () => list.data?.sections.flatMap((s) => s.tasks) ?? [],
     [list.data],
@@ -60,6 +66,7 @@ export function App() {
   const invalidate = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["list"] });
     void qc.invalidateQueries({ queryKey: ["week"] });
+    void qc.invalidateQueries({ queryKey: ["sessions"] });
   }, [qc]);
 
   const toggle = useMutation({
@@ -133,17 +140,30 @@ export function App() {
           e.preventDefault();
           setOverlay("capture");
           break;
+        case "t":
+          e.preventDefault();
+          go("list", { view: "today" });
+          break;
         case "a":
           e.preventDefault();
           go("list", { view: "all" });
+          break;
+        case "l":
+          e.preventDefault();
+          go("list", { view: "logbook" });
           break;
         case "w":
           e.preventDefault();
           go("week", {});
           break;
+        case "b":
         case "[":
           e.preventDefault();
           update({ sidebar: !prefs.sidebar });
+          break;
+        case "f":
+          e.preventDefault();
+          setFilterOpen((o) => !o);
           break;
         case "?":
           e.preventDefault();
@@ -217,8 +237,16 @@ export function App() {
 
   const heading = isWeek
     ? "week"
-    : filters.topic || (filters.tag && `#${filters.tag}`) || filters.assignee || filters.view || "today";
-  const filtered = Boolean(filters.topic || filters.tag || filters.assignee || filters.q);
+    : isCalls
+      ? "calls"
+      : filters.topic ||
+        (filters.tag && `#${filters.tag}`) ||
+        filters.assignee ||
+        filters.view ||
+        "today";
+  const filtered = Boolean(
+    filters.topic || filters.tag || filters.assignee || filters.q || filters.when,
+  );
 
   return (
     <div className="flex h-full">
@@ -226,7 +254,7 @@ export function App() {
         <Sidebar
           meta={meta}
           filters={filters}
-          isWeek={isWeek}
+          kind={route.kind}
           onGo={go}
           onCapture={() => setOverlay("capture")}
           onSettings={() => setOverlay("settings")}
@@ -252,6 +280,13 @@ export function App() {
           <h1 className="text-xl text-ink">{heading}</h1>
 
           <div className="ml-auto flex items-center gap-2">
+            {!isCalls && (
+              <FilterButton
+                open={filterOpen}
+                onToggle={() => setFilterOpen((o) => !o)}
+                filters={filters}
+              />
+            )}
             {(searching || filters.q) && (
               <input
                 ref={searchRef}
@@ -277,7 +312,7 @@ export function App() {
                 <path d="M10.4 10.4L14 14" />
               </svg>
             </button>
-            {!isWeek && (
+            {!isWeek && !isCalls && (
               <Select
                 label="Sort by"
                 value={(list.data?.sort ?? "manual") as string}
@@ -291,8 +326,34 @@ export function App() {
           </div>
         </header>
 
+        {!isCalls && (
+          <FilterRow
+            open={filterOpen}
+            meta={meta}
+            filters={filters}
+            onChange={(f) => go(route.kind, { ...f, view: f.view ?? "all" })}
+          />
+        )}
+
         <main className="min-h-0 flex-1 overflow-y-auto px-6 pb-16">
-          {isWeek
+          {!isWeek && !isCalls && filters.view === "today" && !filtered && (
+            <>
+              <DayHeader meta={meta} />
+              <OverdueNudge
+                count={overdueCount}
+                onGo={() => go("list", { view: "overdue" })}
+              />
+            </>
+          )}
+          {isCalls ? (
+            <Calls
+              onOpenSession={(id) =>
+                go("list", {
+                  view: "all", batch: String(id), q: "", topic: "", assignee: "", tag: "",
+                })
+              }
+            />
+          ) : isWeek
             ? week.data && (
                 <Week
                   data={week.data}
@@ -321,7 +382,7 @@ export function App() {
 
         <StatusBar
           view={heading}
-          position={!isWeek && flat.length ? cursor + 1 : null}
+          position={!isWeek && !isCalls && flat.length ? cursor + 1 : null}
           total={
             isWeek
               ? (week.data

@@ -32,6 +32,35 @@ export type Meta = {
   people: Group[];
   tags: Group[];
   today: string;
+  todayLabel: string;
+  doneToday: number;
+};
+
+export type Session = {
+  id: number;
+  title: string;
+  source: string;
+  when: string;
+  date: string;
+  total: number;
+  open: number;
+  done: number;
+  preview: string;
+};
+
+export type Role =
+  | "ignore" | "title" | "topic" | "owner" | "due" | "note" | "priority" | "tags" | "status";
+
+export type TableColumn = { index: number; header: string; role: Role };
+export type TableRow = { n: number; cells: string[]; task?: PreviewTask; reason?: string };
+export type TablePreview = {
+  columns: TableColumn[];
+  rows: TableRow[];
+  format: string;
+  preset: string;
+  roles: Role[];
+  tasks: number;
+  skipped: number;
 };
 
 export type ListResponse = {
@@ -104,7 +133,19 @@ export type Filters = {
   assignee?: string;
   q?: string;
   start?: string;
+  when?: string;
+  batch?: string;
 };
+
+/** The named periods the "when" filter offers. */
+export const WHEN = [
+  { value: "", label: "any time" },
+  { value: "today", label: "today" },
+  { value: "yesterday", label: "yesterday" },
+  { value: "week", label: "this week" },
+  { value: "lastweek", label: "last week" },
+  { value: "month", label: "this month" },
+];
 
 export class ApiError extends Error {
   status: number;
@@ -147,7 +188,21 @@ export const api = {
   list: (f: Filters) => request<ListResponse>(`/api/list${toQuery(f)}`),
   week: (f: Filters) => request<WeekResponse>(`/api/week${toQuery(f)}`),
   preview: (draft: string) => post<PreviewResponse>("/api/preview", { draft }),
-  capture: (draft: string) => post<{ batchId: number; added: number }>("/api/capture", { draft }),
+  capture: (draft: string, title?: string) =>
+    post<{ batchId: number; added: number }>("/api/capture", { draft, title }),
+  tablePreview: (input: string, mapping?: Role[], topic?: string) =>
+    post<TablePreview>("/api/table/preview", { input, mapping, topic }),
+  tableCapture: (input: string, mapping: Role[], topic: string, title: string, source: string) =>
+    post<{ batchId: number; added: number }>("/api/table/capture", {
+      input, mapping, topic, title, source,
+    }),
+  sessions: () => request<Session[]>("/api/sessions"),
+  renameSession: (id: number, title: string) =>
+    post<void>(`/api/sessions/${id}/rename`, { title }),
+  exportSession: (id: number, group: boolean, notes: boolean) =>
+    request<{ text: string }>(
+      `/api/sessions/${id}/export?group=${group ? "owner" : "none"}&notes=${notes ? 1 : 0}`,
+    ),
   undoBatch: (id: number) => post<{ removed: number }>(`/api/batches/${id}/undo`),
   toggle: (id: number) => post<Task>(`/api/tasks/${id}/toggle`),
   move: (id: number, above: number, below: number) =>

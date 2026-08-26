@@ -111,6 +111,7 @@ func launch(url string) {
 func add(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	dbPath := fs.String("db", store.DefaultPath(), "database file")
+	title := fs.String("title", "", "name the call or meeting these came from")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -139,7 +140,7 @@ func add(args []string) error {
 	}
 	defer st.Close()
 
-	if _, err := st.CreateBatch(res.Tasks, "cli", now); err != nil {
+	if _, err := st.CreateBatch(res.Tasks, store.Capture{Source: "cli", Title: *title}, now); err != nil {
 		return err
 	}
 

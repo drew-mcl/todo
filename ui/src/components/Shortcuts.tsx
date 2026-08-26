@@ -7,6 +7,8 @@ const KEYS: { keys: string[]; label: string }[][] = [
     { keys: ["esc"], label: "close anything" },
     { keys: ["⌘", "k"], label: "command palette" },
     { keys: ["/"], label: "search" },
+    { keys: ["f"], label: "filter by who, when, what" },
+    { keys: ["b"], label: "hide the sidebar" },
     { keys: ["?"], label: "this list" },
   ],
   [
@@ -20,14 +22,14 @@ const KEYS: { keys: string[]; label: string }[][] = [
 ];
 
 const JUMPS: { keys: string[]; label: string }[] = [
-  { keys: ["a"], label: "everything open" },
+  { keys: ["t"], label: "today" },
   { keys: ["w"], label: "plan the week" },
-  { keys: ["["], label: "hide the sidebar" },
-  { keys: ["g", "t"], label: "today" },
+  { keys: ["a"], label: "everything open" },
+  { keys: ["l"], label: "logbook" },
+  { keys: ["g", "o"], label: "overdue" },
   { keys: ["g", "u"], label: "upcoming" },
   { keys: ["g", "a"], label: "anytime" },
   { keys: ["g", "d"], label: "delegated" },
-  { keys: ["g", "l"], label: "logbook" },
 ];
 
 function Key({ k }: { k: string }) {
@@ -82,12 +84,18 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
             ))}
           </div>
         </div>
-        <p className="mt-4 border-t border-line-soft pt-3 font-mono text-xs text-ink-4">
-          <span className="font-medium text-ink-2">topic</span> | what needs doing |{" "}
-          <span className="text-accent">today</span> <span className="text-t0">@who</span>{" "}
-          <span className="text-danger">!!</span> <span className="text-t2">#tag</span>{" "}
-          <span className="italic">&gt; note</span> — lines without a <b>|</b> are left alone.
-        </p>
+        <div className="mt-4 space-y-1 border-t border-line-soft pt-3 font-mono text-xs text-ink-4">
+          <p>
+            <span className="font-medium text-ink-2">topic</span> | what needs doing |{" "}
+            <span className="text-accent">today</span> <span className="text-t0">@who</span>{" "}
+            <span className="text-danger">!!</span> <span className="text-t2">#tag</span>{" "}
+            <span className="italic">&gt; note</span>
+          </p>
+          <p>
+            start a line with <span className="font-medium text-ink-2">|</span> to repeat the topic
+            above — lines without a <span className="font-medium text-ink-2">|</span> are left alone.
+          </p>
+        </div>
       </div>
     </Dialog>
   );

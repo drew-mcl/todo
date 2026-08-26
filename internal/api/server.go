@@ -38,6 +38,11 @@ func (s *Server) routes(client http.Handler) {
 	s.mux.HandleFunc("GET /api/list", s.handleList)
 	s.mux.HandleFunc("GET /api/week", s.handleWeek)
 	s.mux.HandleFunc("POST /api/preview", s.handlePreview)
+	s.mux.HandleFunc("POST /api/table/preview", s.handleTablePreview)
+	s.mux.HandleFunc("POST /api/table/capture", s.handleTableCapture)
+	s.mux.HandleFunc("GET /api/sessions", s.handleSessions)
+	s.mux.HandleFunc("POST /api/sessions/{id}/rename", s.handleRenameSession)
+	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/capture", s.handleCapture)
 	s.mux.HandleFunc("POST /api/batches/{id}/undo", s.handleUndo)
 	s.mux.HandleFunc("POST /api/tasks/{id}/toggle", s.handleToggle)
@@ -87,13 +92,41 @@ func decode(r *http.Request, v any) error {
 
 func (s *Server) query(r *http.Request) store.Query {
 	q := r.URL.Query()
-	return store.Query{
+	out := store.Query{
 		View:     store.View(q.Get("view")),
 		Sort:     store.Sort(q.Get("sort")),
 		Topic:    q.Get("topic"),
 		Tag:      q.Get("tag"),
 		Assignee: q.Get("assignee"),
 		Search:   strings.TrimSpace(q.Get("q")),
+	}
+	if b, err := strconv.ParseInt(q.Get("batch"), 10, 64); err == nil && b > 0 {
+		out.Batch = b
+	}
+	out.From, out.To = whenRange(q.Get("when"), s.now())
+	return out
+}
+
+// whenRange turns a named period into a captured-date range. Named periods
+// rather than a date picker: mid-week you think "last week", not "1 to 7 Sep".
+func whenRange(when string, now time.Time) (from, to string) {
+	day := func(t time.Time) string { return t.Format("2006-01-02") }
+	today := truncate(now)
+	switch when {
+	case "today":
+		return day(today), day(today)
+	case "yesterday":
+		y := today.AddDate(0, 0, -1)
+		return day(y), day(y)
+	case "week":
+		return day(store.WeekStart(today)), day(today)
+	case "lastweek":
+		start := store.WeekStart(today).AddDate(0, 0, -7)
+		return day(start), day(start.AddDate(0, 0, 6))
+	case "month":
+		return day(time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, today.Location())), day(today)
+	default:
+		return "", ""
 	}
 }
 
@@ -119,6 +152,10 @@ func (s *Server) meta(now time.Time) (Meta, error) {
 	if err != nil {
 		return m, err
 	}
+	if m.DoneToday, err = s.store.DoneOn(now); err != nil {
+		return m, err
+	}
+	m.TodayLabel = strings.ToLower(now.Format("Monday 2 January"))
 	m.Topics, m.People, m.Tags = groupDTOs(topics), groupDTOs(people), groupDTOs(tags)
 	return m, nil
 }
@@ -154,8 +191,9 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		View: string(q.View), Sort: string(q.Sort),
 		Sections: sections(tasks, q.View, q.Sort, now),
 		Total:    len(tasks),
-		CanDrag:  q.Sort == store.SortManual && q.View != store.ViewUpcoming && q.View != store.ViewLogbook,
-		Meta:     meta,
+		CanDrag: q.Sort == store.SortManual && q.View != store.ViewUpcoming &&
+			q.View != store.ViewOverdue && q.View != store.ViewLogbook,
+		Meta: meta,
 	}
 	s.json(w, res)
 }
@@ -217,6 +255,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Draft string `json:"draft"`
+		Title string `json:"title"`
 	}
 	if err := decode(r, &body); err != nil {
 		s.errorf(w, http.StatusBadRequest, "Could not read the draft.")
@@ -229,7 +268,7 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
 			"No line contained a '|', so nothing was read as a task")
 		return
 	}
-	batch, err := s.store.CreateBatch(res.Tasks, "web", now)
+	batch, err := s.store.CreateBatch(res.Tasks, store.Capture{Source: "web", Title: body.Title}, now)
 	if err != nil {
 		s.fail(w, err, "saving the tasks")
 		return

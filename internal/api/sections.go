@@ -38,8 +38,9 @@ func sections(tasks []*store.Task, v store.View, s store.Sort, now time.Time) []
 			}
 			return parse.FormatDue(*t.CompletedAt, now)
 		})
-	case v == store.ViewToday:
-		return splitOverdue(tasks, now)
+	case v == store.ViewOverdue:
+		// Oldest first: the thing that slipped furthest is the thing to fix.
+		return by(tasks, now, func(t *store.Task) string { return parse.FormatDue(*t.Due, now) })
 	}
 	return []Section{{Label: "", Tasks: taskDTOs(tasks, now)}}
 }
@@ -66,27 +67,6 @@ func by(tasks []*store.Task, now time.Time, label func(*store.Task) string) []Se
 		run = append(run, t)
 	}
 	flush(current)
-	return out
-}
-
-// splitOverdue lifts anything already late to the top of Today, which is the
-// whole point of the view.
-func splitOverdue(tasks []*store.Task, now time.Time) []Section {
-	var late, due []*store.Task
-	for _, t := range tasks {
-		if t.Overdue(now) {
-			late = append(late, t)
-		} else {
-			due = append(due, t)
-		}
-	}
-	if len(late) == 0 {
-		return []Section{{Label: "", Tasks: taskDTOs(due, now)}}
-	}
-	out := []Section{{Label: "overdue", Tasks: taskDTOs(late, now)}}
-	if len(due) > 0 {
-		out = append(out, Section{Label: "today", Tasks: taskDTOs(due, now)})
-	}
 	return out
 }
 

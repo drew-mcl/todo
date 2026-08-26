@@ -97,6 +97,10 @@ type Meta struct {
 	People []Group        `json:"people"`
 	Tags   []Group        `json:"tags"`
 	Today  string         `json:"today"`
+	// Progress for the day, so Today can show what has been closed and not only
+	// what is left.
+	TodayLabel string `json:"todayLabel"`
+	DoneToday  int    `json:"doneToday"`
 }
 
 // ListResponse backs a list view.
@@ -184,20 +188,26 @@ func previewDTO(res *parse.Result, now time.Time) PreviewResponse {
 			line.OwnerTitle = l.Owner.Title
 		}
 		if l.Task != nil {
-			t := &PreviewTask{
-				Topic: l.Task.Topic, Title: l.Task.Title, Note: l.Task.Note,
-				Assignee: l.Task.Assignee, Priority: int(l.Task.Priority),
-				Tags: l.Task.Tags, Warning: l.Task.Warning,
-			}
-			if t.Tags == nil {
-				t.Tags = []string{}
-			}
-			if l.Task.Due != nil {
-				t.DueLabel = parse.FormatDue(*l.Task.Due, now)
-			}
-			line.Task = t
+			line.Task = previewTask(l.Task, now)
 		}
 		out.Lines = append(out.Lines, line)
 	}
 	return out
+}
+
+// previewTask renders a parsed-but-unsaved task, whether it came from the
+// shorthand or from a pasted grid.
+func previewTask(t *parse.Task, now time.Time) *PreviewTask {
+	p := &PreviewTask{
+		Topic: t.Topic, Title: t.Title, Note: t.Note,
+		Assignee: t.Assignee, Priority: int(t.Priority),
+		Tags: t.Tags, Warning: t.Warning,
+	}
+	if p.Tags == nil {
+		p.Tags = []string{}
+	}
+	if t.Due != nil {
+		p.DueLabel = parse.FormatDue(*t.Due, now)
+	}
+	return p
 }

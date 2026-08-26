@@ -22,21 +22,21 @@
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --text-2xs: 10px;
-  --text-2xs--line-height: 14px;
-  --text-xs: 11px;
-  --text-xs--line-height: 16px;
-  --text-sm: 12px;
-  --text-sm--line-height: 18px;
-  --text-base: 13px;
-  --text-base--line-height: 20px;
-  --text-md: 14px;
-  --text-md--line-height: 21px;
-  --text-lg: 16px;
-  --text-lg--line-height: 24px;
-  --text-xl: 20px;
-  --text-xl--line-height: 28px;
-  --text-2xl: 26px;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 15px;
+  --text-xs: 12px;
+  --text-xs--line-height: 17px;
+  --text-sm: 13px;
+  --text-sm--line-height: 19px;
+  --text-base: 14px;
+  --text-base--line-height: 21px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 17px;
+  --text-lg--line-height: 25px;
+  --text-xl: 22px;
+  --text-xl--line-height: 30px;
+  --text-2xl: 28px;
   --text-2xl--line-height: 32px;
 
   /* ── Space ── 4px base, so nothing lands between steps. */
@@ -97,9 +97,9 @@
   --c-line-soft: #EFEFF1;
 
   --c-ink:   #18181B;
-  --c-ink-2: #3F3F46;
-  --c-ink-3: #71717A;
-  --c-ink-4: #A1A1AA;
+  --c-ink-2: #35353C;
+  --c-ink-3: #5B5B64;
+  --c-ink-4: #83838D;
 
   --c-accent:      #0E7490;
   --c-accent-soft: #0E749018;
@@ -131,9 +131,9 @@
   --c-line-soft: #1F1F22;
 
   --c-ink:   #F4F4F5;
-  --c-ink-2: #C4C4CA;
-  --c-ink-3: #8A8A93;
-  --c-ink-4: #5E5E66;
+  --c-ink-2: #CBCBD2;
+  --c-ink-3: #9A9AA4;
+  --c-ink-4: #70707A;
 
   --c-accent:      #3BB0C4;
   --c-accent-soft: #3BB0C420;

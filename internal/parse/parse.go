@@ -52,10 +52,13 @@ const (
 // DefaultTopic catches task lines written without one, so content is never lost.
 const DefaultTopic = "inbox"
 
-// dittoMarks repeat the topic of the task above. The ditto mark is the notation
-// a paper ledger has always used for "same as above", which is what this is; the
-// rest are accepted so there is no wrong answer to reach for mid-call. An empty
-// topic counts too, since a line starting with "|" can only have meant this.
+// dittoMarks repeat the topic of the task above.
+//
+// The documented form is to simply leave the topic off -- a line that starts
+// with "|" can only have meant "same as the one above", so there is no symbol
+// to remember and the pipes line up down the page. "^" is the explicit
+// alternative for when you want it visible; the rest are silent aliases so no
+// reasonable guess is wrong mid-call.
 var dittoMarks = map[string]bool{
 	`"`:  true, // the ditto mark itself
 	`”`:  true, // what a phone or a word processor will actually insert
@@ -66,8 +69,8 @@ var dittoMarks = map[string]bool{
 	"":   true,
 }
 
-// Ditto is the mark shown in the legend and the docs.
-const Ditto = `"`
+// Ditto is the form shown in the legend and the docs.
+const Ditto = "|"
 
 // Task is one parsed action item.
 type Task struct {

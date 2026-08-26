@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func newServer(t *testing.T) (*Server, *store.Store) {
 func seeded(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
 	srv, st := newServer(t)
-	if _, err := st.CreateBatch(parse.Parse(blob, now).Tasks, "test", now); err != nil {
+	if _, err := st.CreateBatch(parse.Parse(blob, now).Tasks, store.Capture{Source: "test"}, now); err != nil {
 		t.Fatalf("CreateBatch: %v", err)
 	}
 	return srv, st
@@ -127,17 +128,38 @@ func TestListCarriesEverythingTheRowNeeds(t *testing.T) {
 	}
 }
 
-func TestListOverdueSection(t *testing.T) {
+// TestTodayIsExactlyToday pins the rule that keeps Today and the week board
+// telling the same story: late work is its own list, never today's.
+func TestTodayIsExactlyToday(t *testing.T) {
 	srv, st := seeded(t)
-	st.CreateBatch(parse.Parse("admin | late thing | 20/8/2026", now).Tasks, "test", now)
+	st.CreateBatch(parse.Parse("admin | late thing | 20/8/2026", now).Tasks,
+		store.Capture{Source: "test"}, now)
 
-	var res ListResponse
-	do(t, srv, "GET", "/api/list?view=today", nil, &res)
-	if len(res.Sections) < 2 || res.Sections[0].Label != "overdue" {
-		t.Fatalf("expected an overdue section first, got %+v", res.Sections)
+	var today ListResponse
+	do(t, srv, "GET", "/api/list?view=today", nil, &today)
+	for _, got := range titles(today.Sections) {
+		if got == "late thing" {
+			t.Error("an overdue task appeared in Today; it belongs in overdue")
+		}
 	}
-	if !res.Sections[0].Tasks[0].Overdue {
+	if len(titles(today.Sections)) != 1 {
+		t.Errorf("today = %v, want only what is due today", titles(today.Sections))
+	}
+
+	var overdue ListResponse
+	do(t, srv, "GET", "/api/list?view=overdue", nil, &overdue)
+	got := titles(overdue.Sections)
+	if len(got) != 1 || got[0] != "late thing" {
+		t.Errorf("overdue = %v, want the late task", got)
+	}
+	if !overdue.Sections[0].Tasks[0].Overdue {
 		t.Error("the overdue task is not flagged overdue")
+	}
+	if overdue.CanDrag {
+		t.Error("overdue is date-ordered, so manual drag has nothing to mean")
+	}
+	if overdue.Meta.Counts["overdue"] != 1 {
+		t.Errorf("sidebar overdue count = %d, want 1", overdue.Meta.Counts["overdue"])
 	}
 }
 
@@ -271,7 +293,7 @@ func TestToggleUpdateDelete(t *testing.T) {
 
 func TestWeekBoard(t *testing.T) {
 	srv, st := seeded(t)
-	st.CreateBatch(parse.Parse("admin | long overdue | 1/8/2026", now).Tasks, "test", now)
+	st.CreateBatch(parse.Parse("admin | long overdue | 1/8/2026", now).Tasks, store.Capture{Source: "test"}, now)
 
 	var res WeekResponse
 	if code := do(t, srv, "GET", "/api/week", nil, &res); code != http.StatusOK {
@@ -369,4 +391,221 @@ func itoa(n int64) string {
 		b = append([]byte{'-'}, b...)
 	}
 	return string(b)
+}
+
+// ── Sessions, export and tables ─────────────────────────────────────────────
+
+func TestSessionsAndExport(t *testing.T) {
+	srv, st := newServer(t)
+
+	// Two captures, one named after the call it came from.
+	var first struct {
+		BatchID int64 `json:"batchId"`
+	}
+	do(t, srv, "POST", "/api/capture",
+		map[string]string{"draft": blob, "title": "Platform sync"}, &first)
+	do(t, srv, "POST", "/api/capture",
+		map[string]string{"draft": "admin | something else"}, nil)
+
+	var sessions []Session
+	if code := do(t, srv, "GET", "/api/sessions", nil, &sessions); code != http.StatusOK {
+		t.Fatalf("sessions = %d", code)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(sessions))
+	}
+	named := sessions[0]
+	if named.ID != first.BatchID {
+		named = sessions[1]
+	}
+	if named.Title != "Platform sync" {
+		t.Errorf("title = %q", named.Title)
+	}
+	if named.Total != 4 || named.Open != 4 || named.Done != 0 {
+		t.Errorf("counts = %+v, want 4 total and 4 open", named)
+	}
+	if named.When == "" || named.Preview == "" {
+		t.Errorf("a session must be recognisable: %+v", named)
+	}
+	// One that was never named still reads as an event, not a blank.
+	for _, s := range sessions {
+		if s.Title == "" {
+			t.Errorf("session %d has no fallback title", s.ID)
+		}
+	}
+
+	// Complete one, then export what is left.
+	tasks, _ := st.List(store.Query{View: store.ViewAll, Batch: first.BatchID}, now)
+	do(t, srv, "POST", "/api/tasks/"+itoa(tasks[0].ID)+"/toggle", nil, nil)
+
+	var export struct{ Text string }
+	code := do(t, srv, "GET", "/api/sessions/"+itoa(first.BatchID)+"/export", nil, &export)
+	if code != http.StatusOK {
+		t.Fatalf("export = %d", code)
+	}
+	text := export.Text
+	if !strings.HasPrefix(text, "Platform sync — ") {
+		t.Errorf("export does not lead with the call:\n%s", text)
+	}
+	if !strings.Contains(text, "3 actions") {
+		t.Errorf("export miscounts what is outstanding:\n%s", text)
+	}
+	if strings.Contains(text, tasks[0].Title) {
+		t.Errorf("a completed action was exported:\n%s", text)
+	}
+	// Grouped by who owes it, with mine last.
+	if !strings.Contains(text, "\nJo\n") || !strings.Contains(text, "\nMe\n") {
+		t.Errorf("export is not grouped by owner:\n%s", text)
+	}
+	if strings.Index(text, "\nMe\n") < strings.Index(text, "\nJo\n") {
+		t.Errorf("mine should come last:\n%s", text)
+	}
+
+	flat := struct{ Text string }{}
+	do(t, srv, "GET", "/api/sessions/"+itoa(first.BatchID)+"/export?group=none", nil, &flat)
+	if strings.Contains(flat.Text, "\nJo\n") {
+		t.Errorf("group=none still grouped:\n%s", flat.Text)
+	}
+
+	// And it can be renamed after the fact.
+	if code := do(t, srv, "POST", "/api/sessions/"+itoa(first.BatchID)+"/rename",
+		map[string]string{"title": "Platform sync — week 35"}, nil); code != http.StatusNoContent {
+		t.Fatalf("rename = %d", code)
+	}
+	do(t, srv, "GET", "/api/sessions", nil, &sessions)
+	found := false
+	for _, s := range sessions {
+		if s.Title == "Platform sync — week 35" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the rename did not stick")
+	}
+}
+
+func TestListFiltersBySession(t *testing.T) {
+	srv, _ := newServer(t)
+	var a, b struct {
+		BatchID int64 `json:"batchId"`
+	}
+	do(t, srv, "POST", "/api/capture", map[string]string{"draft": "admin | from call a"}, &a)
+	do(t, srv, "POST", "/api/capture", map[string]string{"draft": "admin | from call b"}, &b)
+
+	var res ListResponse
+	do(t, srv, "GET", "/api/list?view=all&batch="+itoa(a.BatchID), nil, &res)
+	if got := titles(res.Sections); len(got) != 1 || got[0] != "from call a" {
+		t.Errorf("session filter returned %v", got)
+	}
+}
+
+const copilotPaste = `| Action | Owner | Deadline | Notes |
+| --- | --- | --- | --- |
+| Chase the vendor about the patch | Sam Okafor | Friday | Missed two dates |
+| Pull the headcount numbers | Jo | 1 Sep | |
+| Ship the thing | Priya | today | |`
+
+func TestTablePreviewAndCapture(t *testing.T) {
+	srv, st := newServer(t)
+
+	var pv TablePreview
+	if code := do(t, srv, "POST", "/api/table/preview",
+		map[string]any{"input": copilotPaste, "topic": "platform sync"}, &pv); code != http.StatusOK {
+		t.Fatalf("table preview = %d", code)
+	}
+	if pv.Preset != "copilot" {
+		t.Errorf("preset = %q, want copilot", pv.Preset)
+	}
+	if pv.Format != "markdown" || pv.Tasks != 3 {
+		t.Errorf("format=%q tasks=%d", pv.Format, pv.Tasks)
+	}
+	if len(pv.Columns) != 4 || pv.Columns[1].Role != "owner" {
+		t.Errorf("columns = %+v", pv.Columns)
+	}
+	if len(pv.Roles) == 0 {
+		t.Error("the client needs the role list to offer a remapping")
+	}
+	first := pv.Rows[0].Task
+	if first == nil || first.Assignee != "sam" || first.Topic != "platform sync" {
+		t.Errorf("first row = %+v", first)
+	}
+	if first.DueLabel == "" {
+		t.Error("friday was not read as a date")
+	}
+
+	// A mapping sent from the interface overrides the guess.
+	var remapped TablePreview
+	do(t, srv, "POST", "/api/table/preview", map[string]any{
+		"input":   copilotPaste,
+		"mapping": []string{"title", "ignore", "due", "note"},
+	}, &remapped)
+	if remapped.Rows[0].Task.Assignee != "" {
+		t.Error("ignoring the owner column had no effect")
+	}
+
+	var out struct {
+		BatchID int64 `json:"batchId"`
+		Added   int   `json:"added"`
+	}
+	if code := do(t, srv, "POST", "/api/table/capture", map[string]any{
+		"input": copilotPaste, "topic": "platform sync",
+		"title": "Platform sync", "source": "copilot",
+	}, &out); code != http.StatusOK {
+		t.Fatalf("table capture = %d", code)
+	}
+	if out.Added != 3 {
+		t.Errorf("added %d, want 3", out.Added)
+	}
+	stored, _ := st.List(store.Query{View: store.ViewAll, Batch: out.BatchID}, now)
+	if len(stored) != 3 {
+		t.Fatalf("stored %d tasks", len(stored))
+	}
+	if stored[0].Raw == "" {
+		t.Error("the source row was not kept")
+	}
+
+	// And a paste that is not a table says so rather than importing nonsense.
+	if code := do(t, srv, "POST", "/api/table/preview",
+		map[string]any{"input": "just some prose"}, nil); code != http.StatusUnprocessableEntity {
+		t.Errorf("non-table = %d, want 422", code)
+	}
+}
+
+func TestWhenFilter(t *testing.T) {
+	srv, st := newServer(t)
+	// now is Tue 25 Aug 2026, so this week began on Mon 24 Aug.
+	seed := func(day string, title string) {
+		when, _ := time.Parse("2006-01-02", day)
+		st.CreateBatch(parse.Parse("admin | "+title, when).Tasks,
+			store.Capture{Source: "test"}, when)
+	}
+	seed("2026-08-25", "said today")
+	seed("2026-08-24", "said monday")
+	seed("2026-08-19", "said last week")
+	seed("2026-07-30", "said last month")
+
+	for _, tc := range []struct {
+		when string
+		want []string
+	}{
+		{"today", []string{"said today"}},
+		{"week", []string{"said today", "said monday"}},
+		{"lastweek", []string{"said last week"}},
+		{"month", []string{"said today", "said monday", "said last week"}},
+		{"", []string{"said today", "said monday", "said last week", "said last month"}},
+	} {
+		var res ListResponse
+		do(t, srv, "GET", "/api/list?view=all&sort=created&when="+tc.when, nil, &res)
+		got := titles(res.Sections)
+		if len(got) != len(tc.want) {
+			t.Errorf("when=%q returned %v, want %v", tc.when, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("when=%q returned %v, want %v", tc.when, got, tc.want)
+				break
+			}
+		}
+	}
 }

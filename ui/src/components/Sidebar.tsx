@@ -1,14 +1,18 @@
 import clsx from "clsx";
 import type { Filters, Meta } from "../api";
+import type { Route } from "../lib/route";
 import { TopicDot } from "./TaskRow";
 
-const VIEWS = [
-  { id: "today", label: "today" },
-  { id: "upcoming", label: "upcoming" },
-  { id: "anytime", label: "anytime" },
-  { id: "delegated", label: "delegated" },
-  { id: "logbook", label: "logbook" },
+/** Pinned: the four you actually live in, each with a single key. */
+const PINNED = [
+  { view: "today", label: "today", key: "t" },
+  { view: "week", label: "week", key: "w", week: true },
+  { view: "all", label: "all", key: "a" },
+  { view: "logbook", label: "logbook", key: "l" },
 ];
+
+/** Everything else narrows the list rather than being somewhere you live. */
+const FILTERS = ["overdue", "upcoming", "anytime", "delegated"];
 
 function Row({
   label,
@@ -16,6 +20,7 @@ function Row({
   hint,
   active,
   dot,
+  tone,
   onClick,
 }: {
   label: string;
@@ -23,6 +28,7 @@ function Row({
   hint?: string;
   active?: boolean;
   dot?: string;
+  tone?: "danger";
   onClick: () => void;
 }) {
   return (
@@ -35,11 +41,13 @@ function Row({
     >
       {dot !== undefined && <TopicDot topic={dot} />}
       <span className="flex-1 truncate">{label}</span>
+      {count !== undefined && count > 0 && (
+        <span className={clsx("text-xs tabular-nums", tone === "danger" ? "text-danger" : "text-ink-4")}>
+          {count}
+        </span>
+      )}
       {hint && (
         <kbd className="rounded-xs border border-line px-1 text-2xs text-ink-4">{hint}</kbd>
-      )}
-      {count !== undefined && count > 0 && (
-        <span className="text-xs tabular-nums text-ink-4">{count}</span>
       )}
     </button>
   );
@@ -81,7 +89,7 @@ function Group({
 export function Sidebar({
   meta,
   filters,
-  isWeek,
+  kind,
   onGo,
   onCapture,
   onSettings,
@@ -90,22 +98,23 @@ export function Sidebar({
 }: {
   meta?: Meta;
   filters: Filters;
-  isWeek: boolean;
-  onGo: (kind: "list" | "week", f: Filters) => void;
+  kind: Route["kind"];
+  onGo: (kind: Route["kind"], f: Filters) => void;
   onCapture: () => void;
   onSettings: () => void;
   onShortcuts: () => void;
   onCollapse: () => void;
 }) {
-  const filtered = filters.topic || filters.assignee || filters.tag;
+  const narrowed = Boolean(filters.topic || filters.assignee || filters.tag || filters.when);
+  const isList = kind === "list";
 
   return (
     <aside className="flex h-full w-[228px] shrink-0 flex-col border-r border-line bg-sunk/40">
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <button
-          onClick={() => onGo("list", { view: "all" })}
+          onClick={() => onGo("list", { view: "today" })}
           className="flex flex-1 items-center gap-2"
-          title="Everything open"
+          title="Today"
         >
           <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]">
             <rect x="1" y="3" width="2.2" height="18" rx="1.1" fill="var(--color-accent)" />
@@ -117,7 +126,7 @@ export function Sidebar({
         </button>
         <button
           onClick={onCollapse}
-          title="Hide sidebar  ["
+          title="Hide sidebar  b"
           className="grid h-6 w-6 place-items-center rounded-md text-ink-4 hover:bg-sunk hover:text-ink-2"
         >
           <svg viewBox="0 0 16 16" className="h-[15px] w-[15px]" fill="none" stroke="currentColor" strokeWidth="1.3">
@@ -136,23 +145,35 @@ export function Sidebar({
           <kbd className="rounded-xs border border-line px-1 text-2xs text-ink-4">n</kbd>
         </button>
 
+        {PINNED.map((p) => (
+          <Row
+            key={p.view}
+            label={p.label}
+            hint={p.key}
+            count={p.week ? undefined : meta?.counts[p.view]}
+            active={p.week ? kind === "week" : isList && filters.view === p.view && !narrowed}
+            onClick={() => onGo(p.week ? "week" : "list", p.week ? {} : { view: p.view })}
+          />
+        ))}
         <Row
-          label="all"
-          hint="a"
-          active={!isWeek && filters.view === "all" && !filtered}
-          onClick={() => onGo("list", { view: "all" })}
+          label="calls"
+          active={kind === "calls"}
+          onClick={() => onGo("calls", {})}
         />
-        <Row label="week" hint="w" active={isWeek} onClick={() => onGo("week", {})} />
 
         <div className="my-2 border-t border-line" />
 
-        {VIEWS.map((v) => (
+        <h2 className="px-2 pb-1 font-mono text-2xs tracking-[0.14em] text-ink-4 uppercase">
+          filters
+        </h2>
+        {FILTERS.map((v) => (
           <Row
-            key={v.id}
-            label={v.label}
-            count={meta?.counts[v.id]}
-            active={!isWeek && filters.view === v.id && !filtered}
-            onClick={() => onGo("list", { view: v.id })}
+            key={v}
+            label={v}
+            count={meta?.counts[v]}
+            tone={v === "overdue" ? "danger" : undefined}
+            active={isList && filters.view === v && !narrowed}
+            onClick={() => onGo("list", { view: v })}
           />
         ))}
 
@@ -161,20 +182,28 @@ export function Sidebar({
           items={meta?.topics ?? []}
           active={filters.topic}
           dots
-          onPick={(name) => onGo(isWeek ? "week" : "list", { ...filters, view: "all", topic: name, tag: "", assignee: "" })}
+          onPick={(name) =>
+            onGo(kind === "week" ? "week" : "list", {
+              ...filters, view: "all", topic: name, tag: "", assignee: "",
+            })
+          }
         />
         <Group
           title="people"
           items={meta?.people ?? []}
           active={filters.assignee}
-          onPick={(name) => onGo(isWeek ? "week" : "list", { ...filters, view: "all", assignee: name, topic: "", tag: "" })}
+          onPick={(name) =>
+            onGo(kind === "week" ? "week" : "list", {
+              ...filters, view: "all", assignee: name, topic: "", tag: "",
+            })
+          }
         />
         <Group
           title="tags"
           items={(meta?.tags ?? []).map((t) => ({ ...t, name: `#${t.name}` }))}
           active={filters.tag ? `#${filters.tag}` : undefined}
           onPick={(name) =>
-            onGo(isWeek ? "week" : "list", {
+            onGo(kind === "week" ? "week" : "list", {
               ...filters, view: "all", tag: name.replace(/^#/, ""), topic: "", assignee: "",
             })
           }
