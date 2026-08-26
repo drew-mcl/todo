@@ -246,11 +246,7 @@ export function Capture({
                 source={mode === "copilot" ? "copilot" : "table"}
                 topic={title}
                 title={title}
-                placeholder={
-                  mode === "copilot"
-                    ? "Paste the action items table from Teams Copilot.\n\n| Action | Owner | Deadline | Notes |\n| --- | --- | --- | --- |\n| Chase the vendor | Sam | Friday | Missed two dates |"
-                    : "Paste a table — from a spreadsheet, a markdown table, or CSV.\n\nIssue\tPlan\tOwner\tDue date\nIngest lag\tDecide on the fix\tsam\t+3d"
-                }
+                placeholder=""
                 onCommitted={(batchId, added) => {
                   onAdded(batchId, added);
                   onClose();
@@ -270,9 +266,7 @@ export function Capture({
                   void commit();
                 }
               }}
-              placeholder={
-                "Paste your notes. Lines with a | become tasks, everything else is left alone.\n\nprod issue | chase the vendor about the patch | today @sam !!\n> they have missed two dates now\n           | write the postmortem | eow #board"
-              }
+              placeholder=""
               className="min-h-[180px] flex-1 resize-none bg-transparent px-6 py-4 font-mono text-md leading-[1.8] text-ink outline-none placeholder:text-ink-4"
             />
 
@@ -281,17 +275,6 @@ export function Capture({
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-line-soft px-6 py-3">
-              <code className="font-mono text-xs text-ink-4">
-                <span className="font-medium text-ink-2">topic</span>
-                <span> | </span>what needs doing<span> | </span>
-                <span className="text-accent">today</span> <span className="text-t0">@who</span>{" "}
-                <span className="text-danger">!!</span> <span className="text-t2">#tag</span>{" "}
-                <span className="italic">&gt; note</span>
-              </code>
-              <span className="font-mono text-xs text-ink-4">
-                start a line with <span className="font-semibold text-ink-2">|</span> to repeat
-                the topic above
-              </span>
               {error && <span className="font-mono text-xs text-danger">{error}</span>}
               <div className="ml-auto flex items-center gap-2">
                 <button

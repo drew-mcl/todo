@@ -96,7 +96,7 @@ day you actually planned.
 
 ## keys
 
-`t` today · `w` week · `a` everything · `l` logbook · `n` capture
+`t` today · `w` week · `a` everything · `l` logbook · `c` calls · `n` capture
 `⌘K` palette · `/` search · `f` filter · `b` hide the sidebar · `?` all of them
 `j`/`k` move · `x` complete · `e` edit · `dd` delete · `u` undo
 `g` then `o` `u` `a` `d` to reach the narrower filters
@@ -130,8 +130,24 @@ your shorthand on one line, what it becomes on the next.
 `e` reopens a task as the line you originally wrote, rather than a form of
 separate fields — correct the shorthand and it is re-read.
 
+`w` plans the week. Seven columns do not fit a terminal, so the days stack and
+scheduling is a keystroke instead of a drag — which turns out to be faster:
+
+```
+  WED 26 AUG · TODAY  3
+    ▌ ○ chase the vendor about the patch build                      !!
+        ● prod issue · sam
+
+  FRI 28 AUG  1
+      ○ write the postmortem
+        ● prod issue
+```
+
+`1`–`7` puts the selected task on that day · `0` takes it off the calendar
+`[` `]` a day either way · `<` `>` another week · `.` back to this one
+
 `n` capture · `⌃s` add · `j`/`k` move · `x` complete · `e` edit · `dd` delete
-`u` undo · `/` search · `t` today · `a` all · `l` logbook · `?` keys · `q` quit
+`u` undo · `/` search · `t` today · `w` week · `a` all · `l` logbook · `?` keys
 
 ## shape
 

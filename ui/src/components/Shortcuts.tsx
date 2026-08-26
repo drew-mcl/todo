@@ -23,6 +23,7 @@ const KEYS: { keys: string[]; label: string }[][] = [
 
 const JUMPS: { keys: string[]; label: string }[] = [
   { keys: ["t"], label: "today" },
+  { keys: ["c"], label: "calls" },
   { keys: ["w"], label: "plan the week" },
   { keys: ["a"], label: "everything open" },
   { keys: ["l"], label: "logbook" },
@@ -84,17 +85,40 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
             ))}
           </div>
         </div>
-        <div className="mt-4 space-y-1 border-t border-line-soft pt-3 font-mono text-xs text-ink-4">
-          <p>
-            <span className="font-medium text-ink-2">topic</span> | what needs doing |{" "}
-            <span className="text-accent">today</span> <span className="text-t0">@who</span>{" "}
-            <span className="text-danger">!!</span> <span className="text-t2">#tag</span>{" "}
-            <span className="italic">&gt; note</span>
-          </p>
-          <p>
-            start a line with <span className="font-medium text-ink-2">|</span> to repeat the topic
-            above — lines without a <span className="font-medium text-ink-2">|</span> are left alone.
-          </p>
+        <div className="mt-4 border-t border-line-soft pt-3">
+          <h3 className="mb-2 font-mono text-2xs tracking-[0.14em] text-ink-4 uppercase">
+            shorthand
+          </h3>
+          <div className="space-y-1.5 font-mono text-xs">
+            <p className="text-ink-3">
+              <span className="font-medium text-ink">topic</span>
+              <span className="text-ink-4"> | </span>what needs doing
+              <span className="text-ink-4"> | </span>
+              <span className="text-accent">today</span> <span className="text-t0">@who</span>{" "}
+              <span className="text-danger">!!</span> <span className="text-t2">#tag</span>{" "}
+              <span className="text-ink-3 italic">&gt; note</span>
+            </p>
+            <p className="text-ink-4">
+              <span className="font-medium text-ink-2">|</span> at the start of a line repeats the
+              topic above · a line with no <span className="font-medium text-ink-2">|</span> is
+              left alone
+            </p>
+          </div>
+
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+            <dt className="text-ink-3">dates</dt>
+            <dd className="m-0 text-ink-4">
+              today · tomorrow · eow · eom · fri · next fri · +3d · +2w · 25/12 · 25 dec ·
+              2026-12-25 · someday
+            </dd>
+            <dt className="text-ink-3">priority</dt>
+            <dd className="m-0 text-ink-4">! high · !! urgent · !!! critical</dd>
+            <dt className="text-ink-3">tables</dt>
+            <dd className="m-0 text-ink-4">
+              paste a tracker or a Copilot summary — columns are read from the headers and can be
+              remapped
+            </dd>
+          </dl>
         </div>
       </div>
     </Dialog>

@@ -7,7 +7,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -26,25 +25,21 @@ const (
 	modeCapture
 	modeEdit
 	modeHelp
+	modeWeek
 )
-
-// section is a labelled run of tasks.
-type section struct {
-	label string
-	tasks []*store.Task
-}
 
 // Model is the whole application.
 type Model struct {
 	store *store.Store
 	now   func() time.Time
 
-	mode mode
-	view store.View
-	sort store.Sort
-	q    string
+	mode     mode
+	cameFrom mode // where capture should return to
+	view     store.View
+	sort     store.Sort
+	q        string
 
-	sections  []section
+	sections  []store.Section
 	flat      []*store.Task
 	hues      map[string]int
 	counts    map[store.View]int
@@ -63,6 +58,11 @@ type Model struct {
 
 	search   textinput.Model
 	onSearch bool
+
+	anim *anim
+
+	plan      *store.Plan
+	weekStart time.Time
 
 	lastBatch int64
 	flash     string
@@ -102,6 +102,7 @@ func New(st *store.Store, now func() time.Time) *Model {
 		store: st, now: now,
 		view: store.ViewToday, sort: store.SortManual,
 		draft: draft, title: title, edit: edit, search: search,
+		anim: newAnim(), weekStart: store.WeekStart(now()),
 	}
 }
 
@@ -110,7 +111,7 @@ func (m *Model) Init() tea.Cmd { return m.reload }
 
 // reloaded carries a refreshed list back into the model.
 type reloaded struct {
-	sections  []section
+	sections  []store.Section
 	flat      []*store.Task
 	hues      map[string]int
 	counts    map[store.View]int
@@ -147,52 +148,12 @@ func (m *Model) reload() tea.Msg {
 	}
 
 	return reloaded{
-		sections:  group(tasks, m.view, m.sort, now),
+		sections:  store.Sections(tasks, m.view, m.sort, now),
 		flat:      tasks,
 		hues:      palette.Assign(names),
 		counts:    counts,
 		doneToday: done,
 	}
-}
-
-// group splits the list the same way the web client does, so the two tell the
-// same story about what you are looking at.
-func group(tasks []*store.Task, v store.View, s store.Sort, now time.Time) []section {
-	if len(tasks) == 0 {
-		return nil
-	}
-	label := func(t *store.Task) string { return "" }
-	switch {
-	case s == store.SortTopic:
-		label = func(t *store.Task) string { return t.Topic }
-	case s == store.SortAssignee:
-		label = func(t *store.Task) string {
-			if t.Assignee == "" {
-				return "me"
-			}
-			return t.Assignee
-		}
-	case v == store.ViewUpcoming, v == store.ViewOverdue:
-		label = func(t *store.Task) string { return strings.ToLower(parse.FormatDue(*t.Due, now)) }
-	case v == store.ViewLogbook:
-		label = func(t *store.Task) string {
-			if t.CompletedAt == nil {
-				return "done"
-			}
-			return strings.ToLower(parse.FormatDue(*t.CompletedAt, now))
-		}
-	}
-
-	var out []section
-	for _, t := range tasks {
-		l := label(t)
-		if n := len(out); n > 0 && out[n-1].label == l {
-			out[n-1].tasks = append(out[n-1].tasks, t)
-			continue
-		}
-		out = append(out, section{label: l, tasks: []*store.Task{t}})
-	}
-	return out
 }
 
 func (m *Model) current() *store.Task {

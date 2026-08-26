@@ -202,6 +202,10 @@ export function App() {
           e.preventDefault();
           go("list", { view: "logbook" });
           break;
+        case "c":
+          e.preventDefault();
+          go("calls", {});
+          break;
         case "w":
           e.preventDefault();
           go("week", {});

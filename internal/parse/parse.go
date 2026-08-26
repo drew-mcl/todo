@@ -69,9 +69,6 @@ var dittoMarks = map[string]bool{
 	"":   true,
 }
 
-// Ditto is the form shown in the legend and the docs.
-const Ditto = "|"
-
 // Task is one parsed action item.
 type Task struct {
 	Topic    string

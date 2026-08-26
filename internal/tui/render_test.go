@@ -285,3 +285,207 @@ func TestScrollsWithTheCursor(t *testing.T) {
 		}
 	}
 }
+
+// TestPreviewSettles covers the one moving part: a parsed line arrives dim and
+// reaches full weight, rather than snapping into place mid-keystroke.
+func TestPreviewSettles(t *testing.T) {
+	st, _ := store.Open(":memory:")
+	defer st.Close()
+
+	clock := now
+	m := New(st, func() time.Time { return clock })
+	m.Update(tea.WindowSizeMsg{Width: 92, Height: 30})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	for _, r := range "admin | pull the numbers | eow" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+
+	first := m.View()
+	if !strings.Contains(plain(first), "pull the numbers") {
+		t.Fatal("the parsed line never appeared")
+	}
+	if !m.anim.running(clock) {
+		t.Error("nothing is settling, so the line arrived fully formed")
+	}
+	// The dot lands last, so at birth it is still a hollow placeholder.
+	if !strings.Contains(plain(first), hollow) {
+		t.Error("the topic dot should arrive after the text, not with it")
+	}
+
+	clock = clock.Add(settle + time.Millisecond)
+	settled := m.View()
+	if m.anim.running(clock) {
+		t.Error("the line never finished settling")
+	}
+	if first == settled {
+		t.Error("the line looks identical settled and unsettled; nothing animated")
+	}
+	if !strings.Contains(plain(settled), bullet) {
+		t.Error("the topic dot never arrived")
+	}
+}
+
+// TestSettleStopsTicking guards the thing that would make this a bad idea:
+// a tick loop that never stops.
+func TestSettleStopsTicking(t *testing.T) {
+	st, _ := store.Open(":memory:")
+	defer st.Close()
+
+	clock := now
+	m := New(st, func() time.Time { return clock })
+	m.Update(tea.WindowSizeMsg{Width: 92, Height: 30})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	for _, r := range "admin | a task" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m.View()
+
+	if _, cmd := m.Update(tickMsg(clock)); cmd == nil {
+		t.Error("stopped ticking while the line was still settling")
+	}
+	clock = clock.Add(settle * 2)
+	m.View()
+	if _, cmd := m.Update(tickMsg(clock)); cmd != nil {
+		t.Error("still ticking after everything settled")
+	}
+}
+
+// ── the week planner ────────────────────────────────────────────────────────
+
+func weekScreen(t *testing.T, keys ...string) (*Model, string) {
+	t.Helper()
+	m, _ := screen(t)
+	step := func(msg tea.Msg) {
+		_, cmd := m.Update(msg)
+		for cmd != nil {
+			out := cmd()
+			if out == nil {
+				return
+			}
+			_, cmd = m.Update(out)
+		}
+	}
+	step(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	for _, k := range keys {
+		if k == "esc" {
+			step(tea.KeyMsg{Type: tea.KeyEsc})
+			continue
+		}
+		step(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+	}
+	return m, m.View()
+}
+
+func TestWeekDraws(t *testing.T) {
+	m, _ := weekScreen(t)
+	if m.mode != modeWeek {
+		t.Fatal("w did not open the planner")
+	}
+	// Tall enough to hold the whole board; at 28 rows it correctly scrolls and
+	// the far ends are off screen.
+	m.Update(tea.WindowSizeMsg{Width: 92, Height: 60})
+	text := strings.ToLower(plain(m.View()))
+
+	// Seven days stacked, because seven columns do not fit a terminal.
+	for _, want := range []string{"mon 24 aug", "wed 26 aug · today", "sun 30 aug", "unscheduled"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the planner is missing %q:\n%s", want, text)
+		}
+	}
+	if !strings.Contains(text, "1-7 day") {
+		t.Error("the planner does not say how to schedule")
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if len([]rune(line)) > 92 {
+			t.Errorf("a line ran past the terminal:\n%s", line)
+		}
+	}
+}
+
+// TestWeekSchedulesByKey is the whole reason the planner works here: dragging
+// has no equivalent, so a day is a keystroke.
+func TestWeekSchedulesByKey(t *testing.T) {
+	m, _ := weekScreen(t)
+
+	// Walk to something in the unscheduled tray.
+	var target *store.Task
+	for i, task := range m.weekFlat() {
+		if task.Due == nil {
+			m.cursor, target = i, task
+			break
+		}
+	}
+	if target == nil {
+		t.Fatal("nothing unscheduled to place")
+	}
+
+	// 5 is the fifth day of the week on screen: Friday 28 August.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
+	for cmd != nil {
+		out := cmd()
+		if out == nil {
+			break
+		}
+		_, cmd = m.Update(out)
+	}
+
+	got, err := m.store.Get(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Due == nil || got.Due.Format("2006-01-02") != "2026-08-28" {
+		t.Fatalf("due = %v, want friday 2026-08-28", got.Due)
+	}
+
+	// 0 takes it back off the calendar.
+	for i, task := range m.weekFlat() {
+		if task.ID == target.ID {
+			m.cursor = i
+		}
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("0")})
+	for cmd != nil {
+		out := cmd()
+		if out == nil {
+			break
+		}
+		_, cmd = m.Update(out)
+	}
+	if got, _ := m.store.Get(target.ID); got.Due != nil {
+		t.Errorf("due = %v, want it cleared", got.Due)
+	}
+}
+
+func TestWeekNavigatesAndReturns(t *testing.T) {
+	m, out := weekScreen(t, ">")
+	if !strings.Contains(strings.ToLower(plain(out)), "31 aug") {
+		t.Errorf("> did not move to the following week:\n%s", plain(out))
+	}
+	m, _ = weekScreen(t, ">", ".")
+	if !m.weekStart.Equal(store.WeekStart(now)) {
+		t.Error(". did not come back to this week")
+	}
+	m, _ = weekScreen(t, "esc")
+	if m.mode != modeList {
+		t.Error("esc did not return to the list")
+	}
+}
+
+// TestCaptureReturnsWhereItCameFrom: n means capture everywhere, and closing it
+// should put you back on the board you were planning, not somewhere else.
+func TestCaptureReturnsWhereItCameFrom(t *testing.T) {
+	m, _ := weekScreen(t, "n")
+	if m.mode != modeCapture {
+		t.Fatal("n did not open capture from the planner")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeWeek {
+		t.Errorf("esc went to %v, want back to the planner", m.mode)
+	}
+
+	m2, _ := screen(t, "n")
+	m2.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m2.mode != modeList {
+		t.Errorf("esc from the list went to %v, want the list", m2.mode)
+	}
+}

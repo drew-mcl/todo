@@ -24,6 +24,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 
+	case weekLoaded:
+		if msg.err != nil {
+			m.failed(msg.err)
+			return m, nil
+		}
+		m.plan = msg.plan
+		if n := len(m.weekFlat()); m.cursor >= n {
+			m.cursor = max(0, n-1)
+		}
+		return m, nil
+
 	case reloaded:
 		if msg.err != nil {
 			m.failed(msg.err)
@@ -36,12 +47,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tickMsg:
+		// Only runs while something is settling; it stops on its own.
+		if m.mode == modeCapture && m.anim.running(m.now()) {
+			return m, tick()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeCapture:
 			return m.updateCapture(msg)
 		case modeEdit:
 			return m.updateEdit(msg)
+		case modeWeek:
+			return m.updateWeek(msg)
 		case modeHelp:
 			m.mode = modeList
 			return m, nil
@@ -140,12 +160,12 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.search.Focus()
 		return m, nil
 	case "n":
-		m.mode = modeCapture
+		m.mode, m.cameFrom = modeCapture, modeList
 		m.onTitle = false
 		m.draft.Focus()
 		m.layout()
 		m.preview = parse.Parse(m.draft.Value(), m.now())
-		return m, textarea.Blink
+		return m, tea.Batch(textarea.Blink, tick())
 	case "e":
 		if t := m.current(); t != nil {
 			m.mode, m.editing = modeEdit, t
@@ -157,6 +177,10 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleCurrent()
 	case "u":
 		return m, m.undoLast()
+	case "w":
+		m.mode, m.cursor = modeWeek, 0
+		m.weekStart = store.WeekStart(m.now())
+		return m, m.loadWeek
 	}
 	return m, nil
 }
@@ -230,7 +254,7 @@ func (m *Model) updateCapture(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		// The draft stays in the box, so reopening picks up where you left off.
-		m.mode = modeList
+		m.mode = m.cameFrom
 		m.draft.Blur()
 		m.title.Blur()
 		return m, nil
@@ -258,6 +282,7 @@ func (m *Model) updateCapture(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Re-read on every keystroke. The parse is cheap, and watching a line
 		// become a task is the whole point of the box.
 		m.preview = parse.Parse(m.draft.Value(), m.now())
+		return m, tea.Batch(cmd, tick())
 	}
 	return m, cmd
 }
@@ -279,8 +304,11 @@ func (m *Model) commit() tea.Cmd {
 	m.draft.SetValue("")
 	m.title.SetValue("")
 	m.preview = nil
-	m.mode = modeList
+	m.mode = m.cameFrom
 	m.draft.Blur()
+	if m.mode == modeWeek {
+		return m.loadWeek
+	}
 	return m.reload
 }
 

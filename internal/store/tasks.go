@@ -871,3 +871,57 @@ func (s *Store) RenameSession(id int64, title string) error {
 	}
 	return nil
 }
+
+// ── Grouping ────────────────────────────────────────────────────────────────
+
+// Section is a labelled run of tasks. An empty label means the tasks run
+// straight down the page with no heading.
+type Section struct {
+	Label string
+	Tasks []*Task
+}
+
+// Sections splits a list into display groups. Grouping follows the active sort,
+// so the headings always explain the order on screen.
+//
+// Here rather than in each front end: the browser and the terminal have to tell
+// the same story about what you are looking at, and two copies of these rules
+// would eventually stop agreeing.
+func Sections(tasks []*Task, v View, s Sort, now time.Time) []Section {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	label := func(*Task) string { return "" }
+	switch {
+	case s == SortTopic:
+		label = func(t *Task) string { return t.Topic }
+	case s == SortAssignee:
+		label = func(t *Task) string {
+			if t.Assignee == "" {
+				return "me"
+			}
+			return t.Assignee
+		}
+	case v == ViewUpcoming, v == ViewOverdue:
+		label = func(t *Task) string { return strings.ToLower(parse.FormatDue(*t.Due, now)) }
+	case v == ViewLogbook:
+		label = func(t *Task) string {
+			if t.CompletedAt == nil {
+				return "done"
+			}
+			return strings.ToLower(parse.FormatDue(*t.CompletedAt, now))
+		}
+	}
+
+	var out []Section
+	for _, t := range tasks {
+		l := label(t)
+		if n := len(out); n > 0 && out[n-1].Label == l {
+			out[n-1].Tasks = append(out[n-1].Tasks, t)
+			continue
+		}
+		out = append(out, Section{Label: l, Tasks: []*Task{t}})
+	}
+	return out
+}

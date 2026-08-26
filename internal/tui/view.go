@@ -27,6 +27,8 @@ func (m *Model) View() string {
 		return m.viewCapture()
 	case modeEdit:
 		return m.viewEdit()
+	case modeWeek:
+		return m.viewWeek()
 	case modeHelp:
 		return m.viewHelp()
 	default:
@@ -121,10 +123,10 @@ func (m *Model) listLines() ([]string, int) {
 
 	for _, sec := range m.sections {
 		out = append(out, "")
-		if sec.label != "" {
-			out = append(out, gutter+styHeading.Render(strings.ToUpper(sec.label)))
+		if sec.Label != "" {
+			out = append(out, gutter+styHeading.Render(strings.ToUpper(sec.Label)))
 		}
-		for _, t := range sec.tasks {
+		for _, t := range sec.Tasks {
 			if index == m.cursor {
 				at = len(out)
 			}
@@ -269,10 +271,10 @@ func (m *Model) viewCapture() string {
 	tasks, notes, skipped := m.preview.Counts()
 	var summary []string
 	if tasks > 0 {
-		summary = append(summary, plural(tasks, "task", "tasks"))
+		summary = append(summary, count(tasks, "task", "tasks"))
 	}
 	if notes > 0 {
-		summary = append(summary, plural(notes, "note", "notes"))
+		summary = append(summary, count(notes, "note", "notes"))
 	}
 	if skipped > 0 {
 		summary = append(summary, fmt.Sprintf("%d skipped", skipped))
@@ -282,8 +284,10 @@ func (m *Model) viewCapture() string {
 	}
 	b.WriteString(gutter + styHeading.Render(strings.ToUpper(strings.Join(summary, " · "))) + "\n")
 
+	now := m.now()
 	room := m.height - m.draft.Height() - 9
 	shown := 0
+
 	for _, line := range m.preview.Lines {
 		if shown >= room {
 			b.WriteString(gutter + styFaint.Render("…") + "\n")
@@ -292,27 +296,44 @@ func (m *Model) viewCapture() string {
 		if line.Kind == parse.KindBlank {
 			continue
 		}
+
+		// The raw line is what you are typing, so it is never animated -- only
+		// what the parser made of it settles in underneath.
 		b.WriteString(gutter + m.shorthand(line.Raw) + "\n")
 		shown++
 
 		switch {
 		case line.Task != nil:
-			b.WriteString(gutter + "  " + styTitle.Render(truncate(line.Task.Title, m.width-16)) +
-				"  " + m.previewMeta(line.Task) + "\n")
+			p := m.anim.note(previewKey(line), now)
+			b.WriteString(gutter + "  " +
+				ramp(p).Render(truncate(line.Task.Title, m.width-16)) +
+				"  " + m.previewMeta(line.Task, p) + "\n")
 			shown++
 			if line.Task.Warning != "" {
 				b.WriteString(gutter + "  " + styDanger.Render(line.Task.Warning) + "\n")
 				shown++
 			}
 		case line.Kind == parse.KindNote:
-			b.WriteString(gutter + "  " + styFaint.Render("attached") + "\n")
+			p := m.anim.note(previewKey(line), now)
+			b.WriteString(gutter + "  " + dimmed(p).Render("attached") + "\n")
 			shown++
 		case line.Kind == parse.KindSkipped:
-			b.WriteString(gutter + "  " + styFaint.Render(line.Reason) + "\n")
+			p := m.anim.note(previewKey(line), now)
+			b.WriteString(gutter + "  " + dimmed(p).Render(line.Reason) + "\n")
 			shown++
 		}
 	}
+	m.anim.sweep()
 	return b.String()
+}
+
+// previewKey identifies a parsed line by what it says rather than where it sits,
+// so typing on line four does not restart the lines above it.
+func previewKey(l parse.Line) string {
+	if l.Task != nil {
+		return "t:" + l.Task.Topic + "|" + l.Task.Title + "|" + l.Task.Assignee
+	}
+	return string(l.Kind) + ":" + l.Raw
 }
 
 // shorthand paints a raw line with its grammar coloured in, using the same
@@ -325,19 +346,36 @@ func (m *Model) shorthand(raw string) string {
 	return truncateStyled(b.String(), m.width-4)
 }
 
-func (m *Model) previewMeta(t *parse.Task) string {
-	parts := []string{m.dot(t.Topic) + " " + styDim.Render(t.Topic)}
+// previewMeta draws the parsed detail. p is how settled the line is: the topic
+// dot and the colours land last, so the line looks assembled rather than faded.
+func (m *Model) previewMeta(t *parse.Task, p float64) string {
+	dot := styFaint.Render(hollow)
+	if visible(p) {
+		dot = m.dot(t.Topic)
+	}
+	parts := []string{dot + " " + dimmed(p).Render(t.Topic)}
+
 	if t.Due != nil {
-		parts = append(parts, styAccent.Render(strings.ToLower(parse.FormatDue(*t.Due, m.now()))))
+		label := strings.ToLower(parse.FormatDue(*t.Due, m.now()))
+		if visible(p) {
+			parts = append(parts, styAccent.Render(label))
+		} else {
+			parts = append(parts, dimmed(p).Render(label))
+		}
 	}
 	if t.Assignee != "" {
-		parts = append(parts, styDim.Render(t.Assignee))
+		parts = append(parts, dimmed(p).Render(t.Assignee))
 	}
 	if t.Priority > 0 {
-		parts = append(parts, styDanger.Render(t.Priority.Marks()))
+		marks := t.Priority.Marks()
+		if visible(p) {
+			parts = append(parts, styDanger.Render(marks))
+		} else {
+			parts = append(parts, dimmed(p).Render(marks))
+		}
 	}
 	for _, tag := range t.Tags {
-		parts = append(parts, styDim.Render("#"+tag))
+		parts = append(parts, dimmed(p).Render("#"+tag))
 	}
 	return strings.Join(parts, styFaint.Render(" · "))
 }
@@ -365,10 +403,21 @@ var helpKeys = [][2]string{
 	{"u", "undo the last capture"},
 	{"/", "search"},
 	{"t", "today"},
+	{"w", "plan the week"},
 	{"a", "everything open"},
 	{"l", "logbook"},
 	{"g o / u / y / d", "overdue / upcoming / anytime / delegated"},
 	{"q", "quit"},
+}
+
+// weekKeys are the ones that only mean something on the planner.
+var weekKeys = [][2]string{
+	{"1 – 7", "put it on that day"},
+	{"0", "take it off the calendar"},
+	{"[ / ]", "a day earlier / later"},
+	{"< / >", "previous / next week"},
+	{".", "back to this week"},
+	{"w / esc", "back to the list"},
 }
 
 func (m *Model) viewHelp() string {
@@ -376,6 +425,10 @@ func (m *Model) viewHelp() string {
 	b.WriteString(m.header() + "\n")
 	b.WriteString("\n" + gutter + styHeading.Render("KEYS") + "\n\n")
 	for _, k := range helpKeys {
+		b.WriteString(gutter + styKey.Render(pad(k[0], 16)) + styDim.Render(k[1]) + "\n")
+	}
+	b.WriteString("\n" + gutter + styHeading.Render("ON THE WEEK") + "\n\n")
+	for _, k := range weekKeys {
 		b.WriteString(gutter + styKey.Render(pad(k[0], 16)) + styDim.Render(k[1]) + "\n")
 	}
 	b.WriteString("\n" + gutter + styHeading.Render("SHORTHAND") + "\n\n")
@@ -387,6 +440,9 @@ func (m *Model) viewHelp() string {
 }
 
 // ── text helpers ────────────────────────────────────────────────────────────
+
+// lipglossWidth is the printable width of a string that carries colour.
+func lipglossWidth(s string) int { return lipgloss.Width(s) }
 
 func pad(s string, n int) string {
 	for lipgloss.Width(s) < n {
@@ -415,7 +471,8 @@ func truncateStyled(s string, n int) string {
 	return lipgloss.NewStyle().MaxWidth(n).Render(s)
 }
 
-func plural(n int, one, many string) string {
+// count renders "1 task" or "3 tasks".
+func count(n int, one, many string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, one)
 	}

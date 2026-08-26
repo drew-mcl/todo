@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/drew-mcl/todo/internal/parse"
 	"github.com/drew-mcl/todo/internal/store"
 )
 
@@ -13,60 +12,14 @@ func truncate(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
-// sections splits tasks into display groups. Grouping follows the active sort,
-// so the headings always explain the order on screen.
+// sections renders the shared grouping as DTOs. The rules themselves live in
+// the store, so the browser and the terminal group identically.
 func sections(tasks []*store.Task, v store.View, s store.Sort, now time.Time) []Section {
-	if len(tasks) == 0 {
-		return []Section{}
+	groups := store.Sections(tasks, v, s, now)
+	out := make([]Section, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, Section{Label: g.Label, Tasks: taskDTOs(g.Tasks, now)})
 	}
-	switch {
-	case s == store.SortTopic:
-		return by(tasks, now, func(t *store.Task) string { return t.Topic })
-	case s == store.SortAssignee:
-		return by(tasks, now, func(t *store.Task) string {
-			if t.Assignee == "" {
-				return "me"
-			}
-			return t.Assignee
-		})
-	case v == store.ViewUpcoming:
-		return by(tasks, now, func(t *store.Task) string { return parse.FormatDue(*t.Due, now) })
-	case v == store.ViewLogbook:
-		return by(tasks, now, func(t *store.Task) string {
-			if t.CompletedAt == nil {
-				return "done"
-			}
-			return parse.FormatDue(*t.CompletedAt, now)
-		})
-	case v == store.ViewOverdue:
-		// Oldest first: the thing that slipped furthest is the thing to fix.
-		return by(tasks, now, func(t *store.Task) string { return parse.FormatDue(*t.Due, now) })
-	}
-	return []Section{{Label: "", Tasks: taskDTOs(tasks, now)}}
-}
-
-// by groups consecutive tasks sharing a label, preserving the incoming order.
-func by(tasks []*store.Task, now time.Time, label func(*store.Task) string) []Section {
-	var out []Section
-	var run []*store.Task
-	flush := func(l string) {
-		if len(run) > 0 {
-			out = append(out, Section{Label: l, Tasks: taskDTOs(run, now)})
-		}
-	}
-	current := ""
-	for i, t := range tasks {
-		l := label(t)
-		if i == 0 {
-			current = l
-		}
-		if l != current {
-			flush(current)
-			current, run = l, nil
-		}
-		run = append(run, t)
-	}
-	flush(current)
 	return out
 }
 

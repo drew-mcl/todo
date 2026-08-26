@@ -157,6 +157,7 @@ export function Sidebar({
         ))}
         <Row
           label="calls"
+          hint="c"
           active={kind === "calls"}
           onClick={() => onGo("calls", {})}
         />
