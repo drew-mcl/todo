@@ -5,9 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/drew-mcl/todo/internal/parse"
 	"github.com/drew-mcl/todo/internal/store"
 )
 
@@ -114,11 +112,7 @@ func (m *Model) updateWeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		// n is capture everywhere else, and a key that means two things is
 		// worse than a week you have to reach with one more press.
-		m.mode, m.cameFrom, m.onTitle = modeCapture, modeWeek, false
-		m.draft.Focus()
-		m.layout()
-		m.preview = parse.Parse(m.draft.Value(), m.now())
-		return m, tea.Batch(textarea.Blink, tick())
+		return m, m.openCapture()
 	case ".":
 		m.weekStart, m.cursor = store.WeekStart(m.now()), 0
 		return m, m.loadWeek
@@ -131,12 +125,7 @@ func (m *Model) updateWeek(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadWeek
 	case "e":
-		if t := m.weekCurrent(); t != nil {
-			m.mode, m.editing = modeEdit, t
-			m.edit.SetValue(rawOf(t))
-			m.edit.Focus()
-			m.edit.CursorEnd()
-		}
+		return m, m.editTask(m.weekCurrent())
 	case "t":
 		m.mode, m.view, m.cursor = modeList, store.ViewToday, 0
 		return m, m.reload
@@ -196,10 +185,9 @@ func truncateDay(t time.Time) time.Time {
 func (m *Model) viewWeek() string {
 	var b strings.Builder
 
-	left := styBrand.Render("todo") + styFaint.Render(" · week")
-	right := styFaint.Render(strings.ToLower(weekRange(m.plan)))
-	gap := max(1, m.width-4-lipglossWidth(left)-lipglossWidth(right))
-	b.WriteString(gutter + left + strings.Repeat(" ", gap) + right + "\n")
+	b.WriteString(m.bar(
+		styBrand.Render("todo")+styFaint.Render(" · week"),
+		styFaint.Render(strings.ToLower(weekRange(m.plan)))) + "\n")
 	b.WriteString(gutter + m.rule() + "\n")
 
 	lines, at := m.weekLines()
@@ -272,56 +260,12 @@ func (m *Model) weekLines() ([]string, int) {
 }
 
 func (m *Model) weekTask(t *store.Task, selected bool) []string {
-	lead := "    "
-	if selected {
-		lead = "  " + styCursor.Render(bar) + " "
-	}
-
-	box := styFaint.Render(hollow)
-	title := styTitle.Render(truncate(t.Title, m.width-16))
-	if t.Done() {
-		box, title = styDim.Render(bullet), styDone.Render(truncate(t.Title, m.width-16))
-	}
-
-	row := lead + box + " " + title
-	if t.Priority > 0 {
-		marks := styDanger.Render(t.Priority.Marks())
-		if gap := m.width - 4 - lipglossWidth(row) - lipglossWidth(marks); gap > 1 {
-			row += strings.Repeat(" ", gap) + marks
-		}
-	}
-
-	out := []string{gutter + row}
-	meta := []string{m.dot(t.Topic) + " " + styDim.Render(t.Topic)}
-	if t.Assignee != "" {
-		meta = append(meta, styDim.Render(t.Assignee))
-	}
-	if t.Overdue(m.now()) && t.Due != nil {
-		meta = append(meta, styDanger.Render(strings.ToLower(parse.FormatDue(*t.Due, m.now()))))
-	}
-	out = append(out, gutter+"      "+strings.Join(meta, styFaint.Render(" · ")))
-	return out
+	return m.block(t, selected, 2, weekMeta)
 }
 
 func (m *Model) weekStatus() string {
-	left := styKey.Render("week")
-	if n := len(m.weekFlat()); n > 0 {
-		left += "  " + styFaint.Render(fmt.Sprintf("%d/%d", m.cursor+1, n))
-	}
-
-	right := styFaint.Render("1-7 day · 0 off · [ ] shift · < > week · w list")
-	switch {
-	case m.problem != "":
-		right = styErr.Render(truncate(m.problem, m.width/2))
-	case m.flash != "":
-		right = styAccent.Render(truncate(m.flash, m.width/2))
-	}
-
-	gap := m.width - 4 - lipglossWidth(left) - lipglossWidth(right)
-	if gap < 1 {
-		return gutter + left
-	}
-	return gutter + left + strings.Repeat(" ", gap) + right
+	return m.status(styKey.Render("week")+position(m.cursor, len(m.weekFlat())),
+		"1-7 day · 0 off · [ ] shift · < > week · w list")
 }
 
 // weekRange names the span on screen.

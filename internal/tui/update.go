@@ -10,14 +10,6 @@ import (
 	"github.com/drew-mcl/todo/internal/store"
 )
 
-// jumps are the g-chords, matching the browser so the two share muscle memory.
-var jumps = map[string]store.View{
-	"o": store.ViewOverdue,
-	"u": store.ViewUpcoming,
-	"y": store.ViewAnytime,
-	"d": store.ViewDelegated,
-}
-
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -98,110 +90,93 @@ func (m *Model) layout() {
 
 func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.onSearch {
-		switch msg.String() {
-		case "enter":
-			// Already filtered; enter just puts the keys back on the list.
-			m.onSearch = false
-			m.search.Blur()
-			return m, nil
-		case "esc":
-			m.onSearch = false
-			m.search.Blur()
-			m.search.SetValue("")
-			m.q = ""
-			return m, m.reload
-		}
-
-		var cmd tea.Cmd
-		m.search, cmd = m.search.Update(msg)
-		// Narrow as you type. Waiting for enter makes a list feel like a form.
-		if q := m.search.Value(); q != m.q {
-			m.q, m.cursor = q, 0
-			return m, tea.Batch(cmd, m.reload)
-		}
-		return m, cmd
+		return m.updateSearch(msg)
 	}
 
 	key := msg.String()
 
-	// g is a prefix; d doubles for delete.
-	if m.chord != "" {
-		chord := m.chord
+	// A prefix has to be remembered between keystrokes, so the chords are
+	// handled before the table is consulted.
+	if chord := m.chord; chord != "" {
 		m.chord = ""
-		switch chord {
-		case "g":
+		switch {
+		case chord == "g" && key == "g":
+			m.cursor = 0
+		case chord == "g":
 			if v, ok := jumps[key]; ok {
 				m.view, m.cursor = v, 0
 				return m, m.reload
 			}
-			if key == "g" {
-				m.cursor = 0
-			}
-			return m, nil
-		case "d":
-			if key == "d" {
-				return m, m.deleteCurrent()
-			}
-			return m, nil
+		case chord == "d" && key == "d":
+			return m, m.deleteCurrent()
 		}
+		return m, nil
+	}
+	if key == "g" || key == "d" {
+		m.chord = key
+		return m, nil
 	}
 
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "?":
-		m.mode = modeHelp
-	case "g":
-		m.chord = "g"
-	case "d":
-		m.chord = "d"
-	case "G":
-		m.cursor = max(0, len(m.flat)-1)
-	case "j", "down":
-		if m.cursor < len(m.flat)-1 {
-			m.cursor++
-		}
-	case "k", "up":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "t":
-		m.view, m.cursor = store.ViewToday, 0
-		return m, m.reload
-	case "a":
-		m.view, m.cursor = store.ViewAll, 0
-		return m, m.reload
-	case "l":
-		m.view, m.cursor = store.ViewLogbook, 0
-		return m, m.reload
-	case "/":
-		m.onSearch = true
-		m.search.Focus()
-		return m, nil
-	case "n":
-		m.mode, m.cameFrom = modeCapture, modeList
-		m.onTitle = false
-		m.draft.Focus()
-		m.layout()
-		m.preview = parse.Parse(m.draft.Value(), m.now())
-		return m, tea.Batch(textarea.Blink, tick())
-	case "e":
-		if t := m.current(); t != nil {
-			m.mode, m.editing = modeEdit, t
-			m.edit.SetValue(rawOf(t))
-			m.edit.Focus()
-			m.edit.CursorEnd()
-		}
-	case "x", " ":
-		return m, m.toggleCurrent()
-	case "u":
-		return m, m.undoLast()
-	case "w":
-		m.mode, m.cursor = modeWeek, 0
-		m.weekStart = store.WeekStart(m.now())
-		return m, m.loadWeek
+	if b, ok := lookup(listBindings, key); ok {
+		return m, b.run(m)
 	}
 	return m, nil
+}
+
+func (m *Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		// Already filtered; enter just puts the keys back on the list.
+		m.onSearch = false
+		m.search.Blur()
+		return m, nil
+	case "esc":
+		m.onSearch = false
+		m.search.Blur()
+		m.search.SetValue("")
+		m.q = ""
+		return m, m.reload
+	}
+
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
+	// Narrow as you type. Waiting for enter makes a list feel like a form.
+	if q := m.search.Value(); q != m.q {
+		m.q, m.cursor = q, 0
+		return m, tea.Batch(cmd, m.reload)
+	}
+	return m, cmd
+}
+
+// openCapture, openEdit and openWeek are the bindings that change mode.
+
+func (m *Model) openCapture() tea.Cmd {
+	m.mode, m.cameFrom, m.onTitle = modeCapture, m.mode, false
+	m.draft.Focus()
+	m.layout()
+	m.preview = parse.Parse(m.draft.Value(), m.now())
+	return tea.Batch(textarea.Blink, tick())
+}
+
+func (m *Model) openEdit() tea.Cmd { return m.editTask(m.current()) }
+
+// editTask reopens a task as the line it was written as, which is the thing you
+// actually want to correct.
+func (m *Model) editTask(t *store.Task) tea.Cmd {
+	if t == nil {
+		return nil
+	}
+	m.mode, m.editing = modeEdit, t
+	m.edit.SetValue(rawOf(t))
+	m.edit.Focus()
+	m.edit.CursorEnd()
+	return nil
+}
+
+func (m *Model) openWeek() tea.Cmd {
+	m.mode, m.cursor = modeWeek, 0
+	m.weekStart = store.WeekStart(m.now())
+	return m.loadWeek
 }
 
 // rawOf is the shorthand a task would be written as. The stored line is used

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -244,7 +245,7 @@ func TestCaptureAndUndo(t *testing.T) {
 	}
 
 	var undo struct{ Removed int }
-	do(t, srv, "POST", "/api/batches/"+itoa(cap.BatchID)+"/undo", nil, &undo)
+	do(t, srv, "POST", "/api/batches/"+id(cap.BatchID)+"/undo", nil, &undo)
 	if undo.Removed != 4 {
 		t.Errorf("undo removed %d, want 4", undo.Removed)
 	}
@@ -256,7 +257,7 @@ func TestCaptureAndUndo(t *testing.T) {
 func TestToggleUpdateDelete(t *testing.T) {
 	srv, st := seeded(t)
 	all, _ := st.List(store.Query{View: store.ViewAll}, now)
-	id := itoa(all[0].ID)
+	id := id(all[0].ID)
 
 	var got Task
 	do(t, srv, "POST", "/api/tasks/"+id+"/toggle", nil, &got)
@@ -321,12 +322,12 @@ func TestWeekBoard(t *testing.T) {
 
 	// Dropping a card onto a day is the same act as setting a due date.
 	var moved Task
-	do(t, srv, "POST", "/api/tasks/"+itoa(res.Unscheduled[0].ID)+"/schedule",
+	do(t, srv, "POST", "/api/tasks/"+id(res.Unscheduled[0].ID)+"/schedule",
 		map[string]string{"date": "2026-08-27"}, &moved)
 	if moved.Due == nil || *moved.Due != "2026-08-27" {
 		t.Errorf("schedule put it on %v, want 2026-08-27", moved.Due)
 	}
-	do(t, srv, "POST", "/api/tasks/"+itoa(moved.ID)+"/schedule", map[string]string{"date": ""}, &moved)
+	do(t, srv, "POST", "/api/tasks/"+id(moved.ID)+"/schedule", map[string]string{"date": ""}, &moved)
 	if moved.Due != nil {
 		t.Errorf("dropping into a tray left due = %v", moved.Due)
 	}
@@ -344,7 +345,7 @@ func TestWeekFilter(t *testing.T) {
 func TestMove(t *testing.T) {
 	srv, st := seeded(t)
 	before, _ := st.List(store.Query{View: store.ViewAll, Sort: store.SortManual}, now)
-	code := do(t, srv, "POST", "/api/tasks/"+itoa(before[3].ID)+"/move",
+	code := do(t, srv, "POST", "/api/tasks/"+id(before[3].ID)+"/move",
 		map[string]int64{"Above": before[0].ID, "Below": before[1].ID}, nil)
 	if code != http.StatusNoContent {
 		t.Fatalf("move = %d", code)
@@ -373,25 +374,6 @@ func TestMetaFeedsTheSidebar(t *testing.T) {
 	if res.Meta.Today != "2026-08-25" {
 		t.Errorf("today = %q", res.Meta.Today)
 	}
-}
-
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	if neg {
-		b = append([]byte{'-'}, b...)
-	}
-	return string(b)
 }
 
 // ── Sessions, export and tables ─────────────────────────────────────────────
@@ -437,10 +419,10 @@ func TestSessionsAndExport(t *testing.T) {
 
 	// Complete one, then export what is left.
 	tasks, _ := st.List(store.Query{View: store.ViewAll, Batch: first.BatchID}, now)
-	do(t, srv, "POST", "/api/tasks/"+itoa(tasks[0].ID)+"/toggle", nil, nil)
+	do(t, srv, "POST", "/api/tasks/"+id(tasks[0].ID)+"/toggle", nil, nil)
 
 	var export struct{ Text string }
-	code := do(t, srv, "GET", "/api/sessions/"+itoa(first.BatchID)+"/export", nil, &export)
+	code := do(t, srv, "GET", "/api/sessions/"+id(first.BatchID)+"/export", nil, &export)
 	if code != http.StatusOK {
 		t.Fatalf("export = %d", code)
 	}
@@ -463,13 +445,13 @@ func TestSessionsAndExport(t *testing.T) {
 	}
 
 	flat := struct{ Text string }{}
-	do(t, srv, "GET", "/api/sessions/"+itoa(first.BatchID)+"/export?group=none", nil, &flat)
+	do(t, srv, "GET", "/api/sessions/"+id(first.BatchID)+"/export?group=none", nil, &flat)
 	if strings.Contains(flat.Text, "\nJo\n") {
 		t.Errorf("group=none still grouped:\n%s", flat.Text)
 	}
 
 	// And it can be renamed after the fact.
-	if code := do(t, srv, "POST", "/api/sessions/"+itoa(first.BatchID)+"/rename",
+	if code := do(t, srv, "POST", "/api/sessions/"+id(first.BatchID)+"/rename",
 		map[string]string{"title": "Platform sync — week 35"}, nil); code != http.StatusNoContent {
 		t.Fatalf("rename = %d", code)
 	}
@@ -494,7 +476,7 @@ func TestListFiltersBySession(t *testing.T) {
 	do(t, srv, "POST", "/api/capture", map[string]string{"draft": "admin | from call b"}, &b)
 
 	var res ListResponse
-	do(t, srv, "GET", "/api/list?view=all&batch="+itoa(a.BatchID), nil, &res)
+	do(t, srv, "GET", "/api/list?view=all&batch="+id(a.BatchID), nil, &res)
 	if got := titles(res.Sections); len(got) != 1 || got[0] != "from call a" {
 		t.Errorf("session filter returned %v", got)
 	}
@@ -735,7 +717,7 @@ func TestBadDateNamesTheField(t *testing.T) {
 	srv, st := seeded(t)
 	all, _ := st.List(store.Query{View: store.ViewAll}, now)
 
-	r := httptest.NewRequest("PATCH", "/api/tasks/"+itoa(all[0].ID),
+	r := httptest.NewRequest("PATCH", "/api/tasks/"+id(all[0].ID),
 		strings.NewReader(`{"title":"renamed","due":"wednesbury"}`))
 	r.Host = "127.0.0.1:8765"
 	w := httptest.NewRecorder()
@@ -752,3 +734,6 @@ func TestBadDateNamesTheField(t *testing.T) {
 		t.Error("a rejected patch applied part of itself")
 	}
 }
+
+// id renders a task or batch id for a URL.
+func id(n int64) string { return strconv.FormatInt(n, 10) }

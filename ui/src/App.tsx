@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type ListResponse, type Task } from "./api";
+import { api, type Task } from "./api";
 import { useRoute } from "./lib/route";
 import { usePrefs } from "./lib/prefs";
 import { HueProvider } from "./lib/hues";
+import { useTaskMutations } from "./lib/mutations";
+import { useKeyboard } from "./lib/keys";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TaskList } from "./components/TaskList";
@@ -23,19 +25,9 @@ type Overlay = "capture" | "palette" | "settings" | "shortcuts" | null;
 /** How long a completed task stays struck through before it folds away. */
 const LINGER = 700;
 
-// g-chords reach the narrowing filters; the four places you live have a plain
-// key of their own.
-const JUMPS: Record<string, string> = {
-  o: "overdue",
-  u: "upcoming",
-  a: "anytime",
-  d: "delegated",
-};
-
 export function App() {
   const { route, go } = useRoute();
   const { prefs, update, setField } = usePrefs();
-  const qc = useQueryClient();
 
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [detail, setDetail] = useState<Task>();
@@ -46,7 +38,6 @@ export function App() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftQuery, setDraftQuery] = useState(route.filters.q ?? "");
   const searchRef = useRef<HTMLInputElement>(null);
-  const chord = useRef<string | null>(null);
 
   const isWeek = route.kind === "week";
   const isCalls = route.kind === "calls";
@@ -69,61 +60,15 @@ export function App() {
     () => (isWeek || isCalls ? [] : (list.data?.sections.flatMap((s) => s.tasks) ?? [])),
     [list.data, isWeek, isCalls],
   );
-  // Everything, for a capture or an undo that can change any list.
-  const invalidate = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ["list"] });
-    void qc.invalidateQueries({ queryKey: ["week"] });
-    void qc.invalidateQueries({ queryKey: ["sessions"] });
-  }, [qc]);
-
-  // Just the board you are looking at, for edits to a single task.
-  const refresh = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: [isWeek ? "week" : "list"] });
-  }, [qc, isWeek]);
-
   const onFailed = useCallback(
     (e: unknown) => setProblem(e instanceof Error ? e.message : "That did not work."),
     [],
   );
-
-  const toggle = useMutation({
-    mutationFn: (t: Task) => api.toggle(t.id),
-    // Tick immediately; the list catches up behind it.
-    onMutate: async (t: Task) => {
-      await qc.cancelQueries({ queryKey: ["list", filters] });
-      const previous = qc.getQueryData<ListResponse>(["list", filters]);
-      qc.setQueryData<ListResponse>(["list", filters], (old) =>
-        old
-          ? {
-              ...old,
-              sections: old.sections.map((s) => ({
-                ...s,
-                tasks: s.tasks.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)),
-              })),
-            }
-          : old,
-      );
-      return { previous };
-    },
-    onError: (e, _t, ctx) => {
-      if (ctx?.previous) qc.setQueryData(["list", filters], ctx.previous);
-      onFailed(e);
-    },
-    // Held back on purpose. The optimistic update has already struck the row
-    // through; refetching at once would whip it off the page before that
-    // registered as anything.
-    onSettled: () => setTimeout(refresh, LINGER),
-  });
-  const schedule = useMutation({
-    mutationFn: ({ id, date }: { id: number; date: string }) => api.schedule(id, date),
-    onSuccess: refresh,
-    onError: onFailed,
-  });
-  const move = useMutation({
-    mutationFn: ({ id, above, below }: { id: number; above: number; below: number }) =>
-      api.move(id, above, below),
-    onSuccess: refresh,
-    onError: onFailed,
+  const { toggle, schedule, move, remove, undoBatch, invalidateAll } = useTaskMutations({
+    filters,
+    isWeek,
+    linger: LINGER,
+    onFailed,
   });
 
   useEffect(() => setCursorId(null), [
@@ -150,137 +95,33 @@ export function App() {
     [go],
   );
 
-  // ── Keyboard ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null;
-      const typing =
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOverlay((o) => (o === "palette" ? null : "palette"));
-        return;
-      }
-      if (e.key === "Escape") {
-        if (overlay) return setOverlay(null);
-        if (detail) return setDetail(undefined);
-        if (searching) {
-          setSearching(false);
-          setDraftQuery("");
-          return;
-        }
-        if (typing) (target as HTMLElement).blur();
-        return;
-      }
-      if (typing || e.metaKey || e.ctrlKey || e.altKey || overlay) return;
-
-      if (chord.current === "g") {
-        chord.current = null;
-        const view = JUMPS[e.key];
-        if (view) {
-          e.preventDefault();
-          go("list", { view });
-        }
-        return;
-      }
-
-      switch (e.key) {
-        case "g":
-          chord.current = "g";
-          setTimeout(() => (chord.current = null), 800);
-          break;
-        case "n":
-          e.preventDefault();
-          setOverlay("capture");
-          break;
-        case "t":
-          e.preventDefault();
-          go("list", { view: "today" });
-          break;
-        case "a":
-          e.preventDefault();
-          go("list", { view: "all" });
-          break;
-        case "l":
-          e.preventDefault();
-          go("list", { view: "logbook" });
-          break;
-        case "c":
-          e.preventDefault();
-          go("calls", {});
-          break;
-        case "w":
-          e.preventDefault();
-          go("week", {});
-          break;
-        case "b":
-        case "[":
-          e.preventDefault();
-          update({ sidebar: !prefs.sidebar });
-          break;
-        case "f":
-          e.preventDefault();
-          setFilterOpen((o) => !o);
-          break;
-        case "?":
-          e.preventDefault();
-          setOverlay("shortcuts");
-          break;
-        case "/":
-          e.preventDefault();
-          setSearching(true);
-          setTimeout(() => searchRef.current?.focus(), 0);
-          break;
-        case "j":
-          e.preventDefault();
-          moveCursor(cursorId === null ? 0 : 1);
-          break;
-        case "k":
-          e.preventDefault();
-          moveCursor(cursorId === null ? 0 : -1);
-          break;
-        case "x":
-          if (cursorTask) {
-            e.preventDefault();
-            toggle.mutate(cursorTask);
-          }
-          break;
-        case "e":
-          if (cursorTask) {
-            e.preventDefault();
-            setDetail(cursorTask);
-          }
-          break;
-        case "d":
-          if (chord.current === "d") {
-            chord.current = null;
-            if (cursorTask) {
-              e.preventDefault();
-              void api.remove(cursorTask.id).then(invalidate);
-            }
-          } else {
-            chord.current = "d";
-            setTimeout(() => (chord.current = null), 600);
-          }
-          break;
-        case "u":
-          if (undo) {
-            e.preventDefault();
-            void api.undoBatch(undo.batchId).then(() => {
-              setUndo(undefined);
-              invalidate();
-            });
-          }
-          break;
-      }
-    }
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, [overlay, detail, searching, filters, flat.length, cursorTask, cursorId, moveCursor, undo, prefs.sidebar, go, update, toggle, invalidate]);
+  useKeyboard({
+    go,
+    filters,
+    cursorTask,
+    overlayOpen: overlay !== null,
+    detailOpen: detail !== undefined,
+    searching,
+    canUndo: undo !== undefined,
+    openOverlay: setOverlay,
+    closeOverlay: () => setOverlay(null),
+    closeDetail: () => setDetail(undefined),
+    openDetail: setDetail,
+    moveCursor,
+    toggle: (t) => toggle.mutate(t),
+    remove,
+    undo: () => undo && void undoBatch(undo.batchId).then(() => setUndo(undefined)),
+    startSearch: () => {
+      setSearching(true);
+      setTimeout(() => searchRef.current?.focus(), 0);
+    },
+    stopSearch: () => {
+      setSearching(false);
+      setDraftQuery("");
+    },
+    toggleSidebar: () => update({ sidebar: !prefs.sidebar }),
+    toggleFilters: () => setFilterOpen((o) => !o),
+  });
 
   // Keep the keyboard cursor in view as it moves.
   useEffect(() => {
@@ -475,8 +316,8 @@ export function App() {
         <Detail
           task={detail}
           onClose={() => setDetail(undefined)}
-          onSaved={invalidate}
-          onDeleted={invalidate}
+          onSaved={invalidateAll}
+          onDeleted={invalidateAll}
         />
 
         <AnimatePresence>
@@ -507,12 +348,7 @@ export function App() {
                 added {undo.added} task{undo.added === 1 ? "" : "s"}
               </span>
               <button
-                onClick={() =>
-                  void api.undoBatch(undo.batchId).then(() => {
-                    setUndo(undefined);
-                    invalidate();
-                  })
-                }
+                onClick={() => void undoBatch(undo.batchId).then(() => setUndo(undefined))}
                 className="rounded-full bg-bg/15 px-2.5 py-0.5 hover:bg-bg/25"
               >
                 undo
@@ -527,7 +363,7 @@ export function App() {
         onClose={() => setOverlay(null)}
         onAdded={(batchId, added) => {
           setUndo({ batchId, added });
-          invalidate();
+          invalidateAll();
         }}
       />
       <Palette

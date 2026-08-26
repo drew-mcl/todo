@@ -508,3 +508,32 @@ admin | tagged thing | eow #board`)
 	byTag, _ := s.Week(WeekStart(now), now, Query{Tag: "board"})
 	eq(t, titles(byTag.Days[4].Tasks), []string{"tagged thing"})
 }
+
+// TestWeekFiltersMatchListFilters: the planner used to build its own WHERE
+// clause and had fallen behind the list's by three filters.
+func TestWeekFiltersMatchListFilters(t *testing.T) {
+	s := open(t)
+	batch := seed(t, s, "admin | from this call | eow")
+	seed(t, s, "admin | from another call | eow")
+
+	plan, err := s.Week(WeekStart(now), now, Query{Batch: batch})
+	if err != nil {
+		t.Fatalf("Week: %v", err)
+	}
+	var got []string
+	for _, d := range plan.Days {
+		got = append(got, titles(d.Tasks)...)
+	}
+	eq(t, got, []string{"from this call"})
+
+	// And the captured-date window, which it also ignored.
+	none, err := s.Week(WeekStart(now), now, Query{From: "2027-01-01"})
+	if err != nil {
+		t.Fatalf("Week: %v", err)
+	}
+	for _, d := range none.Days {
+		if len(d.Tasks) != 0 {
+			t.Errorf("a task captured in the past survived a future window: %v", titles(d.Tasks))
+		}
+	}
+}

@@ -582,3 +582,47 @@ func TestSearchNarrowsAsYouType(t *testing.T) {
 		t.Errorf("esc left %d of %d", len(m.flat), before)
 	}
 }
+
+// TestHelpComesFromTheBindings: the keys and their documentation used to be two
+// hand-kept lists, and had already begun to disagree.
+func TestHelpComesFromTheBindings(t *testing.T) {
+	_, out := screen(t, "?")
+	text := plain(out)
+
+	for _, b := range listBindings {
+		if b.help == "" {
+			continue
+		}
+		if !strings.Contains(text, b.help) {
+			t.Errorf("%q is bound but not documented", b.label())
+		}
+	}
+	for _, want := range []string{"put it on that day", "delete", "SHORTHAND"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help is missing %q", want)
+		}
+	}
+}
+
+// TestEveryBindingRuns guards the table itself: a binding with no action would
+// be a key that silently does nothing.
+func TestEveryBindingRuns(t *testing.T) {
+	for _, b := range listBindings {
+		if b.run == nil {
+			t.Errorf("%q is listed but does nothing", b.label())
+		}
+		if len(b.keys) == 0 {
+			t.Errorf("a binding for %q has no key", b.help)
+		}
+	}
+	// And no key is claimed twice.
+	seen := map[string]string{}
+	for _, b := range listBindings {
+		for _, k := range b.keys {
+			if other, clash := seen[k]; clash {
+				t.Errorf("%q is bound to both %q and %q", k, other, b.help)
+			}
+			seen[k] = b.help
+		}
+	}
+}

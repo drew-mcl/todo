@@ -68,7 +68,7 @@ func (m *Model) viewList() string {
 	}
 
 	b.WriteString("\n" + gutter + m.rule() + "\n")
-	b.WriteString(m.status())
+	b.WriteString(m.statusLine())
 	return b.String()
 }
 
@@ -94,23 +94,15 @@ func window(lines []string, at, room int) []string {
 
 func (m *Model) header() string {
 	now := m.now()
-	left := styBrand.Render("todo")
-
-	open := m.counts[store.ViewToday]
 	right := styFaint.Render(strings.ToLower(now.Format("Mon 2 January")))
-	if m.view == store.ViewToday && open+m.doneToday > 0 {
+
+	if open := m.counts[store.ViewToday]; m.view == store.ViewToday && open+m.doneToday > 0 {
 		// The date still earns its place; the meter joins it rather than
 		// replacing it.
-		right = styFaint.Render(strings.ToLower(now.Format("Mon 2 January"))) + "  " +
-			m.meterBar(10) + "  " +
+		right += "  " + m.meterBar(10) + "  " +
 			styFaint.Render(fmt.Sprintf("%d of %d done", m.doneToday, open+m.doneToday))
 	}
-
-	gap := m.width - 4 - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
-	}
-	return gutter + left + strings.Repeat(" ", gap) + right + "\n" + gutter + m.rule()
+	return m.bar(styBrand.Render("todo"), right) + "\n" + gutter + m.rule()
 }
 
 // meterBar draws the day's progress. It travels rather than jumping, which is
@@ -157,35 +149,7 @@ func (m *Model) listLines() ([]string, int) {
 }
 
 func (m *Model) taskLines(t *store.Task, selected bool) []string {
-	var out []string
-
-	// The cursor is a mark in the gutter, not a highlight across the row.
-	lead := "  "
-	if selected {
-		lead = styCursor.Render(bar) + " "
-	}
-
-	box := styFaint.Render(hollow)
-	title := styTitle.Render(truncate(t.Title, m.width-12))
-	if t.Done() {
-		// Accent, not grey: a finished thing should look finished for the
-		// moment it is still on screen.
-		box = styAccent.Render(bullet)
-		title = styDone.Render(truncate(t.Title, m.width-12))
-	}
-
-	row := lead + box + " " + title
-	if t.Priority > 0 {
-		marks := styDanger.Render(t.Priority.Marks())
-		if gap := m.width - 4 - lipgloss.Width(row) - lipgloss.Width(marks); gap > 1 {
-			row += strings.Repeat(" ", gap) + marks
-		}
-	}
-	out = append(out, gutter+row)
-
-	if meta := m.metaLine(t); meta != "" {
-		out = append(out, gutter+"    "+meta)
-	}
+	out := m.block(t, selected, 0, listMeta)
 	for _, n := range strings.Split(t.Note, "\n") {
 		if n == "" {
 			continue
@@ -194,26 +158,6 @@ func (m *Model) taskLines(t *store.Task, selected bool) []string {
 			styDim.Render(truncate(n, m.width-12)))
 	}
 	return out
-}
-
-func (m *Model) metaLine(t *store.Task) string {
-	parts := []string{m.dot(t.Topic) + " " + styDim.Render(t.Topic)}
-
-	if t.Due != nil {
-		label := strings.ToLower(parse.FormatDue(*t.Due, m.now()))
-		if t.Overdue(m.now()) {
-			parts = append(parts, styDanger.Render(label))
-		} else {
-			parts = append(parts, styDim.Render(label))
-		}
-	}
-	if t.Assignee != "" {
-		parts = append(parts, styDim.Render(t.Assignee))
-	}
-	for _, tag := range t.Tags {
-		parts = append(parts, styDim.Render("#"+tag))
-	}
-	return strings.Join(parts, styFaint.Render(" · "))
 }
 
 func (m *Model) emptyWords() (string, string) {
@@ -243,32 +187,16 @@ func (m *Model) emptyWords() (string, string) {
 
 // ── status ──────────────────────────────────────────────────────────────────
 
-func (m *Model) status() string {
+func (m *Model) statusLine() string {
 	if m.onSearch {
 		return gutter + m.search.View()
 	}
-
 	left := styKey.Render(string(m.view))
 	if m.q != "" {
 		left += styFaint.Render(" /" + m.q)
 	}
-	if len(m.flat) > 0 {
-		left += "  " + styFaint.Render(fmt.Sprintf("%d/%d", m.cursor+1, len(m.flat)))
-	}
-
-	right := styFaint.Render("n capture · j/k · x done · ? keys · q quit")
-	switch {
-	case m.problem != "":
-		right = styErr.Render(truncate(m.problem, m.width/2))
-	case m.flash != "":
-		right = styAccent.Render(m.flash)
-	}
-
-	gap := m.width - 4 - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		return gutter + left
-	}
-	return gutter + left + strings.Repeat(" ", gap) + right
+	return m.status(left+position(m.cursor, len(m.flat)),
+		"n capture · j/k · x done · ? keys · q quit")
 }
 
 // ── capture ─────────────────────────────────────────────────────────────────
@@ -277,12 +205,11 @@ func (m *Model) viewCapture() string {
 	var b strings.Builder
 
 	right := styFaint.Render("⌃s add · tab · esc")
-	left := styBrand.Render("capture") + "  " + m.title.View()
 	// The title input is sized in layout() to leave room for both ends; clip
 	// anyway, because a header that wraps breaks every line beneath it.
-	head := truncateStyled(left, max(10, m.width-4-lipgloss.Width(right)-2))
-	gap := max(1, m.width-4-lipgloss.Width(head)-lipgloss.Width(right))
-	b.WriteString(gutter + head + strings.Repeat(" ", gap) + right + "\n")
+	left := truncateStyled(styBrand.Render("capture")+"  "+m.title.View(),
+		max(10, m.width-6-lipgloss.Width(right)))
+	b.WriteString(m.bar(left, right) + "\n")
 	b.WriteString(gutter + m.rule() + "\n")
 	b.WriteString(m.draft.View() + "\n")
 	b.WriteString(gutter + m.rule() + "\n")
@@ -416,45 +343,24 @@ func (m *Model) viewEdit() string {
 	return b.String()
 }
 
-var helpKeys = [][2]string{
-	{"n", "capture"},
-	{"⌃s", "add what you have typed"},
-	{"j / k", "move"},
-	{"g g / G", "top / bottom"},
-	{"x", "complete"},
-	{"e", "edit the line"},
-	{"d d", "delete"},
-	{"u", "undo the last capture"},
-	{"/", "search"},
-	{"t", "today"},
-	{"w", "plan the week"},
-	{"a", "everything open"},
-	{"l", "logbook"},
-	{"g o / u / y / d", "overdue / upcoming / anytime / delegated"},
-	{"q", "quit"},
-}
-
-// weekKeys are the ones that only mean something on the planner.
-var weekKeys = [][2]string{
-	{"1 – 7", "put it on that day"},
-	{"0", "take it off the calendar"},
-	{"[ / ]", "a day earlier / later"},
-	{"< / >", "previous / next week"},
-	{".", "back to this week"},
-	{"w / esc", "back to the list"},
-}
-
 func (m *Model) viewHelp() string {
 	var b strings.Builder
 	b.WriteString(m.header() + "\n")
-	b.WriteString("\n" + gutter + styHeading.Render("KEYS") + "\n\n")
-	for _, k := range helpKeys {
-		b.WriteString(gutter + styKey.Render(pad(k[0], 16)) + styDim.Render(k[1]) + "\n")
+
+	section := func(title string, bindings []binding) {
+		b.WriteString("\n" + gutter + styHeading.Render(title) + "\n\n")
+		for _, k := range bindings {
+			if k.help == "" {
+				continue
+			}
+			b.WriteString(gutter + styKey.Render(pad(k.label(), 16)) + styDim.Render(k.help) + "\n")
+		}
 	}
-	b.WriteString("\n" + gutter + styHeading.Render("ON THE WEEK") + "\n\n")
-	for _, k := range weekKeys {
-		b.WriteString(gutter + styKey.Render(pad(k[0], 16)) + styDim.Render(k[1]) + "\n")
-	}
+
+	section("KEYS", listBindings)
+	section("AND TWO-KEY", chordBindings)
+	section("ON THE WEEK", weekBindings)
+
 	b.WriteString("\n" + gutter + styHeading.Render("SHORTHAND") + "\n\n")
 	b.WriteString(gutter + m.shorthand("topic | what needs doing | today @who !! #tag > note") + "\n")
 	b.WriteString(gutter + m.shorthand("      | repeats the topic above") + "\n")
@@ -464,9 +370,6 @@ func (m *Model) viewHelp() string {
 }
 
 // ── text helpers ────────────────────────────────────────────────────────────
-
-// lipglossWidth is the printable width of a string that carries colour.
-func lipglossWidth(s string) int { return lipgloss.Width(s) }
 
 func pad(s string, n int) string {
 	for lipgloss.Width(s) < n {
