@@ -77,6 +77,13 @@ test-ui:
 SWIFT = swiftc -swift-version 5 -target $(shell uname -m)-apple-macos13 \
 	-sdk $(shell xcrun --show-sdk-path) -framework AppKit -framework Carbon
 
+## shot: draw the capture window to mac/build/shot.png, to look at it
+shot: build
+	@mkdir -p mac/build
+	$(SWIFT) -o mac/build/shot $(BAR_LIB) mac/Tests/shot/main.swift
+	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db \
+		SHOT=$$PWD/mac/build/shot.png DRAFT=$(DRAFT) mac/build/shot
+
 ## test-bar: the capture bar, against a live bridge (needs Swift)
 test-bar: build
 	@mkdir -p mac/build

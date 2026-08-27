@@ -101,7 +101,12 @@ bridge.send("hello") { reply in
         check("the preview names what each line becomes",
               shown.contains("chase the vendor about the patch")
                   && shown.contains("write the postmortem"))
-        check("a note says where it went", shown.contains("attached"))
+        // A note is shown under the task it belongs to, not as a line of its own:
+        // printing it twice made the list look like it had read the line twice.
+        check("a note is shown under its task",
+              shown.contains("↳ they have missed two dates now"))
+        check("a note does not also get a block of its own",
+              shown.components(separatedBy: "they have missed").count - 1 == 1)
         check("a line with no separator says why it was left",
               shown.contains("no topic separator"))
         check("the summary counts what the terminal counts",
@@ -115,8 +120,8 @@ bridge.send("hello") { reply in
             check("the mark is on the line the caret is on",
                   row.contains("write the postmortem"), row.trimmingCharacters(in: .newlines))
         }
-        check("only one line is marked",
-              shown.components(separatedBy: "▌").count - 1 == 1)
+        check("only the caret's block is lit",
+              marked.map { $0.length > 0 && NSMaxRange($0) <= (shown as NSString).length } ?? false)
 
         // The ditto line takes the topic above it, and shares its dot.
         let topics = preview.lines.compactMap { $0.task?.topic }
@@ -166,6 +171,9 @@ bridge.send("hello") { reply in
             return out.handled && out.state.mode == .normal && out.exit == nil
         }())
         check("esc from normal files", after(["\u{1b}"]).exit == .file)
+        check("so does return, once you have stopped typing",
+              after(["\r"]).exit == .file
+                  && !Vim.press("\r", VimState(text: "a", at: 1, mode: .insert)).handled)
         check("ZZ files, ZQ scraps",
               after(["Z", "Z"]).exit == .file && after(["Z", "Q"]).exit == .scrap)
         check("dd takes the line and its newline",

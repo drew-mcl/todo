@@ -91,6 +91,9 @@ describe("modes", () => {
 
   it("files on escape from normal, which is what closing means everywhere else", () => {
     expect(run("some|thing", ["Escape"]).exit).toBe("file");
+    // Once you have stopped typing, return means what it means everywhere else.
+    expect(run("some|thing", ["Enter"]).exit).toBe("file");
+    expect(press("Enter", { value: "a", at: 1, mode: "insert", pending: "" }).handled).toBe(false);
     expect(run("some|thing", ["Z", "Z"]).exit).toBe("file");
     expect(run("some|thing", ["Z", "Q"]).exit).toBe("scrap");
   });
@@ -126,12 +129,13 @@ describe("the reference sheet", () => {
     "h", "j", "k", "l", "0", "$", "^", "gg", "G",
     "w", "b", "e",
     "x", "dd", "D", "cc", "u",
-    "ZZ", "ZQ", "?",
+    "ZZ", "ZQ", "?", "return",
   ];
 
   it("answers every key it advertises", () => {
     for (const entry of documented) {
-      const keys = entry === "esc" ? ["Escape"] : entry.split("");
+      const keys =
+        entry === "esc" ? ["Escape"] : entry === "return" ? ["Enter"] : entry.split("");
       const out = run("one t|wo\nthree", keys);
       // u is deliberately the browser's own undo; everything else is ours.
       if (entry === "u") continue;

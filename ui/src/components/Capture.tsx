@@ -239,7 +239,8 @@ export function Capture({
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="name this call (optional)"
+                placeholder="header (optional)"
+                title="Names this capture, so you can find it again under calls."
                 className="min-w-0 flex-1 bg-transparent font-mono text-md text-ink outline-none placeholder:text-ink-4"
               />
               <div className="flex gap-0.5 rounded-md border border-line bg-sunk p-0.5">
@@ -257,11 +258,19 @@ export function Capture({
                   </button>
                 ))}
               </div>
-              <p className="font-mono text-xs whitespace-nowrap text-ink-4">
-                <kbd className="rounded-xs border border-line px-1">⌘</kbd>
-                <kbd className="ml-px rounded-xs border border-line px-1">↵</kbd> add ·{" "}
-                <kbd className="rounded-xs border border-line px-1">esc</kbd> close
-              </p>
+              <span
+                title={
+                  mode === "normal"
+                    ? "esc files what is there · ⌘/ for the keys"
+                    : "esc stops typing · ⌘/ for the keys"
+                }
+                className={clsx(
+                  "font-mono text-2xs tracking-widest whitespace-nowrap uppercase",
+                  mode === "normal" ? "text-accent" : "text-ink-4",
+                )}
+              >
+                {mode}
+              </span>
             </header>
 
             {tab !== "shorthand" ? (
@@ -338,14 +347,9 @@ export function Capture({
                 start a line with <span className="font-semibold text-ink-2">|</span> to repeat
                 the topic above
               </span>
-              <span
-                className={clsx(
-                  "rounded-xs px-1.5 py-0.5 font-mono text-2xs tracking-wide uppercase",
-                  mode === "normal" ? "bg-accent/15 text-accent" : "text-ink-4",
-                )}
-                title="esc stops typing · ⌘/ for the keys"
-              >
-                {mode}
+              <span className="font-mono text-xs text-ink-4">
+                <kbd className="rounded-xs border border-line px-1">esc</kbd> file ·{" "}
+                <kbd className="rounded-xs border border-line px-1">⌘/</kbd> keys
               </span>
               {error && <span className="font-mono text-xs text-danger">{error}</span>}
               <div className="ml-auto flex items-center gap-2">

@@ -124,8 +124,10 @@ export function press(key: string, s: State): Result {
   }
 
   switch (key) {
-    // Leaving.
+    // Leaving. Once you have stopped typing, Enter means what it means in every
+    // other box on the machine.
     case "Escape":
+    case "Enter":
       return { ...s, handled: true, exit: "file" };
     case "?":
       return { ...s, handled: true, exit: "help" };

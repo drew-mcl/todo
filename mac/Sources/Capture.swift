@@ -4,6 +4,40 @@ import AppKit
 // become on the bottom. Every keystroke is re-read, which is the whole reason
 // this exists rather than a text field and a save button.
 
+/// A button drawn in this window's colours.
+///
+/// Not an NSButton. AppKit paints one in the system accent -- whatever blue the
+/// machine is set to -- and on recent macOS it is a hosted view that draws the
+/// whole control, so neither the bezel colour nor an override of draw(_:) can
+/// talk it out of it. The palette everything else here comes from wins instead.
+final class Pill: NSView {
+    var fill: NSColor = .controlAccentColor { didSet { needsDisplay = true } }
+    var label = NSAttributedString() { didSet { needsDisplay = true } }
+    var isEnabled = true { didSet { needsDisplay = true } }
+    var onClick: (() -> Void)?
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: max(56, label.size().width + 26), height: 26)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        fill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+        let size = label.size()
+        label.draw(at: NSPoint(x: (bounds.width - size.width) / 2,
+                               y: (bounds.height - size.height) / 2))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        onClick?()
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { label.string }
+}
+
 final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     let panel = CapturePanel()
 
@@ -11,7 +45,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private let titleField = NSTextField()
     private let summary = NSTextField(labelWithString: "")
     private let hint = NSTextField(labelWithString: "")
-    private let addButton = NSButton()
+    private let modeLabel = NSTextField(labelWithString: "")
+    private let addButton = Pill()
     private var draft: NSTextView!
     private var previewView: NSTextView!
     private var previewScroll: NSScrollView!
@@ -183,13 +218,22 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         return true
     }
 
-    /// A block caret in normal mode, a bar while typing: the way an editor says
-    /// which one it is in without a word.
+    /// A modal editor that will not say which mode it is in is the oldest bad
+    /// joke in software, so it says so twice: in the top bar, and in the colour
+    /// of the caret you are looking at anyway.
     private func showMode() {
         let normal = vim.mode == .normal
         draft.insertionPointColor = Theme.shared.colour(normal ? "accent" : "ink")
-        summary.attributedStringValue = Render.heading(
-            normal ? "NORMAL · " + Render.summary(latest) : Render.summary(latest))
+        modeLabel.attributedStringValue = NSAttributedString(
+            string: normal ? "NORMAL" : "INSERT",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: Theme.shared.colour(normal ? "accent" : "ink4"),
+                .kern: 1.2,
+            ])
+        modeLabel.toolTip = normal
+            ? "esc files what is there · ⌘/ for the keys"
+            : "esc stops typing · ⌘/ for the keys"
         drawChrome()
     }
 
@@ -335,6 +379,10 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     /// Redraw with whatever is known now -- called when the colours arrive.
     func repaint() { render() }
 
+    /// Feed a key straight to normal mode. The window cannot hold the keyboard
+    /// when it is only being drawn to a file, so `make shot` says so directly.
+    func pressForShot(_ key: String) { _ = runVim(key) }
+
     private func render() {
         colourTheDraft()
         drawPreview()
@@ -379,8 +427,16 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private func drawChrome() {
         summary.attributedStringValue = Render.heading(Render.summary(latest))
 
-        addButton.isEnabled = (latest?.tasks ?? 0) > 0
-        addButton.title = latest.map { $0.tasks > 0 ? "file \($0.tasks)" : "file" } ?? "file"
+        let ready = (latest?.tasks ?? 0) > 0
+        addButton.isEnabled = ready
+        addButton.label = NSAttributedString(
+            string: latest.map { $0.tasks > 0 ? "file \($0.tasks)" : "file" } ?? "file",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: Theme.shared.colour(ready ? "sunk" : "ink4"),
+            ])
+        addButton.fill = Theme.shared.colour(ready ? "accent" : "line")
+        addButton.invalidateIntrinsicContentSize()
 
         // A task line typed into the title box is the one mistake this shape of
         // window invites, so it is named rather than left to look like a parser
@@ -433,7 +489,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private func build() {
         guard let root = panel.contentView else { return }
 
-        titleField.placeholderString = "name this call (optional)"
+        titleField.placeholderString = "header (optional)"
+        titleField.toolTip = "Names this capture, so you can find it again under calls."
         titleField.font = Type.mono
         titleField.isBordered = false
         titleField.drawsBackground = false
@@ -464,20 +521,25 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         hint.attributedStringValue = Render.grammar()
         hint.lineBreakMode = .byTruncatingTail
 
-        addButton.bezelStyle = .rounded
-        addButton.title = "file"
-        addButton.keyEquivalent = "\r"
-        addButton.keyEquivalentModifierMask = [.command]
-        addButton.target = self
-        addButton.action = #selector(addPressed)
+        // Not the default button. macOS paints that one in the system accent,
+        // which is whatever blue the machine is set to and nothing to do with
+        // the palette everything else here is drawn from. ⌘↵ still files -- the
+        // key monitor has it, and had it before this button ever saw the event.
+        // Drawn, not bezelled. A push button is painted in the system accent --
+        // whatever blue the machine is set to -- and a default button doubly so,
+        // neither of which has anything to do with the palette the rest of this
+        // window is drawn from. ⌘↵ still files: the key monitor has it.
+        addButton.onClick = { [weak self] in self?.fileAndClose() }
 
-        let keys = NSTextField(labelWithString: "esc file · ⌘⌫ scrap")
+        let keys = NSTextField(labelWithString: "esc file · ⌘⌫ scrap · ⌘/ keys")
         keys.font = Type.mono
         keys.textColor = Theme.shared.colour("ink4")
 
+        modeLabel.toolTip = "esc stops typing · ⌘/ for the keys"
+
         let views: [NSView] = [
-            titleField, headRule, draftScroll, divider, summary, previewScrollView,
-            footRule, hint, keys, addButton,
+            titleField, modeLabel, headRule, draftScroll, divider, summary,
+            previewScrollView, footRule, hint, keys, addButton,
         ]
         for v in views {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -488,7 +550,11 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         NSLayoutConstraint.activate([
             titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: pad),
-            titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -pad),
+            titleField.trailingAnchor.constraint(
+                equalTo: modeLabel.leadingAnchor, constant: -12),
+
+            modeLabel.centerYAnchor.constraint(equalTo: titleField.centerYAnchor),
+            modeLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -pad),
 
             headRule.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 12),
             headRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -497,7 +563,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
             draftScroll.topAnchor.constraint(equalTo: headRule.bottomAnchor),
             draftScroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             draftScroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            draftScroll.heightAnchor.constraint(equalTo: root.heightAnchor, multiplier: 0.42),
+            draftScroll.heightAnchor.constraint(equalTo: root.heightAnchor, multiplier: 0.34),
 
             divider.topAnchor.constraint(equalTo: draftScroll.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -527,8 +593,6 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
             addButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
         ])
     }
-
-    @objc private func addPressed() { fileAndClose() }
 
     @objc private func titleCommitted() { panel.makeFirstResponder(draft) }
 

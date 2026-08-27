@@ -118,8 +118,8 @@ It is the same box as the one in the terminal: your shorthand on top, what it
 becomes underneath, re-read on every keystroke.
 
 Closing is filing. A capture box you have finished with is a capture box whose
-contents you meant, so `esc` — the way out — files what you wrote and puts you
-back. Throwing it away is the keystroke you have to mean: `⌘⌫`. Either way `⌘Z`
+contents you meant, so `esc` stops typing and `esc` again files what you wrote
+and puts you back — as does `↵`, once you have stopped typing. Throwing it away is the keystroke you have to mean: `⌘⌫`. Either way `⌘Z`
 puts it back, tasks off the list and words back in the box, so nothing here
 costs more than one keystroke to undo. A draft with nothing fileable in it is
 kept rather than filed or lost.
@@ -142,7 +142,14 @@ The hotkey is `⌥Space` unless you say otherwise:
 defaults write com.drew-mcl.todo.capture hotkey "ctrl+opt+t"
 ```
 
+The box has vim keys in it — `hjkl`, `w b e`, `0 ^ $`, `gg G`, `dd D cc x`, and
+the usual ways back to typing. `⌘/` shows the list. The browser's box has the
+same ones, from the same list: it lives in `internal/vim` and is served to both,
+so neither reference can promise a key only one of them answers.
+
 `make bar` builds it without installing; `make bar-uninstall` takes it back off.
+`make shot` draws the window to `mac/build/shot.png`, which is how it gets looked
+at without a screenshot.
 Nothing about it is required — the terminal app and the web one do not know it
 is there.
 

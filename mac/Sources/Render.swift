@@ -41,9 +41,13 @@ enum Render {
         return out
     }
 
-    /// The preview, and the range of the row the caret's line produced -- which
-    /// is what the window scrolls to, so the preview follows the draft instead
-    /// of sitting at the top of a page you typed several minutes ago.
+    /// The preview, and the range of the block the caret's line produced --
+    /// which is what the window scrolls to, so the preview follows the draft.
+    ///
+    /// Every block is the same shape: what the line will be called, then the
+    /// quiet detail underneath it, then a gap. They shared a line and three
+    /// different left edges before, which put a 13pt face and an 11pt one on
+    /// one baseline and read as a jumble rather than a list.
     static func preview(_ preview: Preview?, hues: [String: Int], caret: Int)
         -> (NSAttributedString, NSRange?) {
         guard let preview, !preview.lines.isEmpty else {
@@ -55,31 +59,69 @@ enum Render {
 
         for line in preview.lines {
             let start = out.length
-            let live = line.n == caret
-            out.append(mark(live))
+            var rows: [NSAttributedString] = []
 
             switch line.kind {
             case "task":
-                if let task = line.task { out.append(row(task, hue: hues[task.topic])) }
+                if let task = line.task {
+                    rows.append(strong(task.title))
+                    rows.append(meta(task, hue: hues[task.topic]))
+                    if !task.note.isEmpty {
+                        rows.append(quiet("↳ " + task.note.replacingOccurrences(of: "\n", with: " "),
+                                          "ink3"))
+                    }
+                    if !task.warning.isEmpty {
+                        rows.append(NSAttributedString(string: task.warning, attributes: [
+                            .font: Type.mono, .foregroundColor: Theme.shared.colour("danger"),
+                        ]))
+                    }
+                }
             case "note":
-                let owner = line.ownerTitle.map { " to “\($0)”" } ?? ""
-                out.append(quiet("↳ attached" + owner, "ink3"))
+                // It is already shown under the task it belongs to. Printing it
+                // again, with its own arrow, only made the list look like it had
+                // read the line twice.
+                continue
             default:
-                out.append(struck(line.raw))
-                out.append(quiet("   " + (line.reason ?? "skipped"), "ink4"))
+                rows.append(struck(line.raw))
+                rows.append(quiet(line.reason ?? "skipped", "ink4"))
             }
 
-            if let warning = line.task?.warning, !warning.isEmpty {
+            let live = line.n == caret
+            for (i, row) in rows.enumerated() {
+                // The bar runs down the whole block, one row at a time, so it
+                // marks the line being typed the way the terminal's does.
+                let piece = NSMutableAttributedString(string: live ? "▏ " : "  ", attributes: [
+                    .font: Type.mono,
+                    .foregroundColor: Theme.shared.colour(live ? "accent" : "sunk"),
+                ])
+                piece.append(row)
+                piece.addAttribute(
+                    .paragraphStyle, value: paragraph(last: i == rows.count - 1),
+                    range: NSRange(location: 0, length: piece.length))
+                out.append(piece)
                 out.append(NSAttributedString(string: "\n"))
-                out.append(mark(live))
-                out.append(NSAttributedString(string: "  " + warning, attributes: [
-                    .font: Type.mono, .foregroundColor: Theme.shared.colour("danger"),
-                ]))
             }
-            out.append(NSAttributedString(string: "\n"))
+
             if live { marked = NSRange(location: start, length: out.length - start) }
         }
         return (out, marked)
+    }
+
+    /// The gap that separates one line's block from the next.
+    private static func paragraph(last: Bool) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 1
+        style.paragraphSpacing = last ? 10 : 0
+        style.headIndent = 20
+        return style
+    }
+
+    /// What a line will be called.
+    private static func strong(_ s: String) -> NSAttributedString {
+        NSAttributedString(string: s, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium),
+            .foregroundColor: Theme.shared.colour("ink"),
+        ])
     }
 
     /// What the draft currently amounts to, in the same words the terminal uses.
@@ -139,13 +181,11 @@ enum Render {
 
     // ── one row ─────────────────────────────────────────────────────────────
 
-    /// A parsed task: what it will be called, then the quiet detail.
-    private static func row(_ task: PreviewTask, hue: Int?) -> NSAttributedString {
-        let out = NSMutableAttributedString(string: task.title, attributes: [
-            .font: Type.title, .foregroundColor: Theme.shared.colour("ink"),
-        ])
-
+    /// The quiet detail under a title: whose it is, when, and how loud.
+    private static func meta(_ task: PreviewTask, hue: Int?) -> NSAttributedString {
+        let out = NSMutableAttributedString()
         var parts: [NSAttributedString] = []
+
         let dot = NSMutableAttributedString(string: "● ", attributes: [
             .font: Type.mono, .foregroundColor: Theme.shared.topicColour(hue),
         ])
@@ -165,14 +205,9 @@ enum Render {
         }
         for tag in task.tags { parts.append(quiet("#" + tag, "ink3")) }
 
-        out.append(quiet("   ", "ink3"))
         for (i, part) in parts.enumerated() {
             if i > 0 { out.append(quiet(" · ", "ink4")) }
             out.append(part)
-        }
-        if !task.note.isEmpty {
-            out.append(NSAttributedString(string: "\n     "))
-            out.append(quiet(task.note.replacingOccurrences(of: "\n", with: " "), "ink3"))
         }
         return out
     }
@@ -181,14 +216,6 @@ enum Render {
     static func heading(_ s: String) -> NSAttributedString {
         NSAttributedString(string: s, attributes: [
             .font: Type.heading, .foregroundColor: Theme.shared.colour("ink4"), .kern: 0.8,
-        ])
-    }
-
-    /// The bar down the side of the line being typed: the same mark the list
-    /// cursor uses in the terminal.
-    static func mark(_ on: Bool) -> NSAttributedString {
-        NSAttributedString(string: on ? "▌ " : "  ", attributes: [
-            .font: Type.mono, .foregroundColor: Theme.shared.colour("accent"),
         ])
     }
 

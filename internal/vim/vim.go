@@ -55,7 +55,8 @@ func Reference() []Group {
 		}},
 		{Name: "leaving", Keys: []Key{
 			{"esc", "file what is there and close"},
-			{"ZZ", "the same"},
+			{"return", "the same, once you have stopped typing"},
+			{"ZZ", "and the same"},
 			{"ZQ", "scrap it and close"},
 			{"?", "this list"},
 		}},

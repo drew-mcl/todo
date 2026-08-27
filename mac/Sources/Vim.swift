@@ -74,7 +74,9 @@ enum Vim {
         }
 
         switch key {
-        case "\u{1b}":
+        case "\u{1b}", "\r", "\n":
+            // Once you have stopped typing, return means the same as it does in
+            // every other box on the machine.
             return VimResult(state: out, handled: true, exit: .file)
         case "?":
             return VimResult(state: out, handled: true, exit: .help)
