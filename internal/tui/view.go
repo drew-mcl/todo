@@ -59,8 +59,8 @@ func (m *Model) viewList() string {
 
 	// header is two lines, the footer three; the rest is list.
 	room := max(1, m.height-6)
-	lines, at := m.listLines()
-	lines = window(lines, at, room)
+	blocks, at := m.listBlocks()
+	lines, _, _ := paint(blocks, at, room)
 
 	b.WriteString(strings.Join(lines, "\n"))
 	if pad := room - len(lines); pad > 0 {
@@ -72,30 +72,77 @@ func (m *Model) viewList() string {
 	return b.String()
 }
 
-// window keeps the selected line on screen, scrolling only as far as it must.
-func window(lines []string, at, room int) []string {
-	out, _ := scrollTo(lines, at, room)
-	return out
-}
-
-// scrollTo is the same, and also says where the window starts, which is how a
-// screen knows whether to admit there is more above.
-func scrollTo(lines []string, at, room int) (out []string, start int) {
-	if len(lines) <= room {
-		return lines, 0
+// fold is where a window of room rows starts, so that row at stays on screen.
+func fold(total, at, room int) int {
+	if total <= room {
+		return 0
 	}
 	// A margin, so the selection is never pinned to the very edge.
+	start := 0
 	const margin = 3
 	if at > room-margin {
 		start = at - room + margin
 	}
-	if start > len(lines)-room {
-		start = len(lines) - room
+	if start > total-room {
+		start = total - room
 	}
 	if start < 0 {
 		start = 0
 	}
-	return lines[start : start+room], start
+	return start
+}
+
+// block is one thing on a screen that can be measured before it is drawn: a
+// task and its detail, a heading, a parsed line and what it became.
+type block struct {
+	height int
+	draw   func() []string
+}
+
+// paint draws the blocks around block at that fall inside room rows, and says
+// how much is hidden either side.
+//
+// Only what fits is drawn at all. Measuring costs nothing next to colouring --
+// a task is its row, its meta line and its notes -- so a list of five hundred,
+// or a paste of five hundred, costs a screenful of lipgloss per frame rather
+// than a page of it, twenty-two times a second.
+func paint(blocks []block, at, room int) (rows []string, above, below int) {
+	starts := make([]int, len(blocks))
+	total := 0
+	for i, b := range blocks {
+		starts[i] = total
+		total += b.height
+	}
+
+	focus := 0
+	if at >= 0 && at < len(blocks) {
+		// The end of the block, so the whole of what is selected stays on.
+		focus = starts[at] + blocks[at].height - 1
+	}
+	start := fold(total, focus, room)
+
+	from := -1
+	for i, b := range blocks {
+		if starts[i]+b.height <= start || starts[i] >= start+room {
+			continue
+		}
+		if from < 0 {
+			from = starts[i]
+		}
+		rows = append(rows, b.draw()...)
+	}
+	if from < 0 {
+		from = start
+	}
+	// The first block drawn may begin above the fold, and the last may run past
+	// the bottom.
+	if cut := start - from; cut > 0 && cut < len(rows) {
+		rows = rows[cut:]
+	}
+	if len(rows) > room {
+		rows = rows[:room]
+	}
+	return rows, start, total - start - len(rows)
 }
 
 func (m *Model) header() string {
@@ -120,38 +167,56 @@ func (m *Model) meterBar(width int) string {
 		styRule.Render(strings.Repeat("━", width-filled))
 }
 
-// listLines draws the whole list and reports which line the cursor sits on, so
-// the caller can scroll to it.
-func (m *Model) listLines() ([]string, int) {
+// listBlocks lays the list out as measurable pieces and reports which one the
+// cursor sits on, so the caller can scroll to it and draw only what shows.
+func (m *Model) listBlocks() ([]block, int) {
 	if len(m.flat) == 0 {
 		line, hint := m.emptyWords()
 		lead := styDim.Render(line)
 		if m.view == store.ViewToday && m.doneToday > 0 {
 			lead = styAccent.Render("✓ ") + styTitle.Render(line)
 		}
-		return []string{"", gutter + lead, gutter + styFaint.Render(hint)}, 0
+		rows := []string{"", gutter + lead, gutter + styFaint.Render(hint)}
+		return []block{{height: len(rows), draw: func() []string { return rows }}}, 0
 	}
 
-	var out []string
+	var blocks []block
 	at, index := 0, 0
 
 	for _, sec := range m.sections {
-		out = append(out, "")
+		head := []string{""}
 		if sec.Label != "" {
-			out = append(out, gutter+styHeading.Render(strings.ToUpper(sec.Label)))
+			head = append(head, gutter+styHeading.Render(strings.ToUpper(sec.Label)))
 		}
+		blocks = append(blocks, block{height: len(head), draw: func() []string { return head }})
+
 		for _, t := range sec.Tasks {
 			if index == m.cursor {
-				at = len(out)
+				at = len(blocks)
 			}
-			out = append(out, m.taskLines(t, index == m.cursor)...)
-			// A blank line between tasks: at this density the blocks run into
-			// one another without it.
-			out = append(out, "")
+			selected := index == m.cursor
+			blocks = append(blocks, block{
+				// The row, its meta line, its notes, and the blank that keeps
+				// one task from running into the next: at this density they do.
+				height: 3 + noteRows(t.Note),
+				draw:   func() []string { return append(m.taskLines(t, selected), "") },
+			})
 			index++
 		}
 	}
-	return out, at
+	return blocks, at
+}
+
+// noteRows is how many rows a note takes. taskLines has to agree with it, and a
+// test says so: a block that lies about its height scrolls to the wrong place.
+func noteRows(note string) int {
+	n := 0
+	for _, line := range strings.Split(note, "\n") {
+		if line != "" {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *Model) taskLines(t *store.Task, selected bool) []string {
@@ -241,12 +306,10 @@ func (m *Model) viewCapture() string {
 	}
 
 	blocks, at := m.previewBlocks()
-	rows, focus := flatten(blocks, at)
 
 	// Header, two rules and the summary; the rest is preview.
 	room := max(1, m.height-m.draft.Height()-5)
-	shown, above := scrollTo(rows, focus, room)
-	below := len(rows) - above - len(shown)
+	shown, above, below := paint(blocks, at, room)
 
 	b.WriteString(m.bar(styHeading.Render(m.previewSummary()), scrollMark(above, below)) + "\n")
 	b.WriteString(strings.Join(shown, "\n"))
@@ -288,20 +351,19 @@ func scrollMark(above, below int) string {
 	return styFaint.Render(strings.Join(parts, " "))
 }
 
-// previewBlock is one input line and what the parser made of it, kept together
-// so scrolling moves a whole line's worth at a time rather than separating a
-// line from what it became.
-type previewBlock []string
-
-// previewBlocks draws the parse and reports which block belongs to the line the
-// cursor is on. The preview follows the draft: typing on the tenth line used to
-// leave the preview showing the first six, which reads as a preview that has
-// stopped working rather than one that is looking somewhere else.
-func (m *Model) previewBlocks() ([]previewBlock, int) {
+// previewBlocks lays the parse out as measurable pieces and reports which one
+// belongs to the line the cursor is on.
+//
+// How tall a line's block will be is known without drawing it -- the line, what
+// it became, and a warning if there is one -- so the colouring is spent on the
+// dozen or so the window actually shows. The preview follows the draft: typing
+// on the tenth line used to leave it showing the first six, which reads as a
+// preview that has stopped working rather than one looking somewhere else.
+func (m *Model) previewBlocks() ([]block, int) {
 	now := m.now()
 	cursor := m.draft.Line() + 1
 
-	var out []previewBlock
+	var blocks []block
 	at := 0
 	for _, line := range m.preview.Lines {
 		if line.Kind == parse.KindBlank {
@@ -310,52 +372,56 @@ func (m *Model) previewBlocks() ([]previewBlock, int) {
 		// The nearest block at or above the cursor: a blank line has nothing of
 		// its own to show, so it holds the preview where it was.
 		if line.N <= cursor {
-			at = len(out)
+			at = len(blocks)
 		}
 
-		// The line being typed carries the same bar the list cursor uses, so
-		// which of a page of lines is yours is never in doubt.
-		lead := func(indent int) string {
-			if line.N == cursor {
-				return styCursor.Render(bar) + strings.Repeat(" ", indent+1)
-			}
-			return gutter + strings.Repeat(" ", indent)
-		}
-
-		// The raw line is what you are typing, so it is never animated -- only
-		// what the parser made of it settles in underneath.
-		rows := []string{lead(0) + m.shorthand(line.Raw)}
-		p := m.anim.note(previewKey(line), now)
-
+		height := 2
 		switch {
-		case line.Task != nil:
-			rows = append(rows, lead(2)+
-				ramp(p).Render(truncate(line.Task.Title, m.width-16))+
-				"  "+m.previewMeta(line.Task, p))
-			if line.Task.Warning != "" {
-				rows = append(rows, lead(2)+styDanger.Render(line.Task.Warning))
-			}
-		case line.Kind == parse.KindNote:
-			rows = append(rows, lead(2)+dimmed(p).Render("attached"))
-		case line.Kind == parse.KindSkipped:
-			rows = append(rows, lead(2)+dimmed(p).Render(line.Reason))
+		case line.Task != nil && line.Task.Warning != "":
+			height = 3
+		case line.Task == nil && line.Kind != parse.KindNote && line.Kind != parse.KindSkipped:
+			height = 1
 		}
-		out = append(out, rows)
+		// Settling is remembered for every line, drawn or not, so scrolling back
+		// to one does not start it over.
+		p := m.anim.note(previewKey(line), now)
+		blocks = append(blocks, block{
+			height: height,
+			draw:   func() []string { return m.previewRows(line, p, line.N == cursor) },
+		})
 	}
 	m.anim.sweep()
-	return out, at
+	return blocks, at
 }
 
-// flatten lays the blocks out as lines and says which line the focused block
-// ends on, which is the one the window has to keep on screen.
-func flatten(blocks []previewBlock, at int) (rows []string, focus int) {
-	for i, block := range blocks {
-		if i == at {
-			focus = len(rows) + len(block) - 1
+// previewRows draws one input line and what the parser made of it.
+func (m *Model) previewRows(line parse.Line, p float64, live bool) []string {
+	// The line being typed carries the same bar the list cursor uses, so which
+	// of a page of lines is yours is never in doubt.
+	lead := func(indent int) string {
+		if live {
+			return styCursor.Render(bar) + strings.Repeat(" ", indent+1)
 		}
-		rows = append(rows, block...)
+		return gutter + strings.Repeat(" ", indent)
 	}
-	return rows, focus
+
+	// The raw line is what you are typing, so it is never animated -- only what
+	// the parser made of it settles in underneath.
+	rows := []string{lead(0) + m.shorthand(line.Raw)}
+	switch {
+	case line.Task != nil:
+		rows = append(rows, lead(2)+
+			ramp(p).Render(truncate(line.Task.Title, m.width-16))+
+			"  "+m.previewMeta(line.Task, p))
+		if line.Task.Warning != "" {
+			rows = append(rows, lead(2)+styDanger.Render(line.Task.Warning))
+		}
+	case line.Kind == parse.KindNote:
+		rows = append(rows, lead(2)+dimmed(p).Render("attached"))
+	case line.Kind == parse.KindSkipped:
+		rows = append(rows, lead(2)+dimmed(p).Render(line.Reason))
+	}
+	return rows
 }
 
 // previewKey identifies a parsed line by what it says rather than where it sits,
