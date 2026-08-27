@@ -193,13 +193,15 @@ scheduling is a keystroke instead of a drag — which turns out to be faster:
 `1`–`7` puts the selected task on that day · `0` takes it off the calendar
 `[` `]` a day either way · `<` `>` another week · `.` back to this one
 
-`n` capture · `⌃s` add · `j`/`k` move · `x` complete · `e` edit · `dd` delete
-`u` undo · `/` search · `t` today · `w` week · `a` all · `l` logbook · `?` keys
+`n` capture · `j`/`k` move · `x` complete · `e` edit · `dd` delete
+`u` take back · `/` search · `t` today · `w` week · `a` all · `l` logbook · `?` keys
 
-In the capture box, `tab` names the call and `esc` steps back out of the name
-before it closes the box. Which of the two has the keys is drawn, not implied —
-a stray tab used to swallow a whole page of notes into a one-line title.
-Closing keeps the draft.
+Closing the capture box files it — `esc` — the same as the window on the
+desktop. `⌃x` scraps it instead, `u` takes back either one with the words as
+well as the tasks, and a draft with nothing fileable in it is simply kept.
+`tab` names the call, and which of the two boxes has the keys is drawn rather
+than implied: a stray tab used to swallow a whole page of notes into a one-line
+title.
 
 Search narrows as you type. Completing something holds it on screen, struck
 through, before it folds away — and when the last thing today goes, the day

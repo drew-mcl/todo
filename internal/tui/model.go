@@ -75,6 +75,11 @@ type Model struct {
 	flashAt time.Time
 
 	lastBatch int64
+
+	// What the last filing or scrap had in the box, so taking it back puts the
+	// words there as well as taking the tasks off the list.
+	held      string
+	heldTitle string
 	flash     string
 	problem   string
 	chord     string
