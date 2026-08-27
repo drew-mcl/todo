@@ -43,6 +43,9 @@ bar: build
 
 ## bar-install: put the bar in ~/Applications and start it at login
 bar-install: bar install
+	@# A running copy keeps running from the bundle we are about to replace, and
+	@# `open` would only bring it to the front, so a reinstall would not take.
+	@pkill -f "Applications/todo capture.app" 2>/dev/null || true
 	@mkdir -p "$$HOME/Applications"
 	@rm -rf "$$HOME/Applications/todo capture.app"
 	@cp -R "$(APP)" "$$HOME/Applications/"
