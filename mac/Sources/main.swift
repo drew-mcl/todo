@@ -26,10 +26,13 @@ final class Bar: NSObject, NSApplicationDelegate {
         buildStatusItem()
 
         guard let bridge = Bridge() else {
-            complain("todo was not found",
-                     "The capture bar runs the todo binary. Put it on your PATH, or "
-                     + "point at it with: defaults write com.drew-mcl.todo.capture binary /path/to/todo")
-            NSApp.terminate(nil)
+            // No modal. This runs at login, and an alert nobody is sitting in
+            // front of blocks the app rather than telling anyone anything --
+            // which is how it wedged the first time. The menu bar says it
+            // instead, where there is already somewhere to look.
+            note("todo was not found — see the menu")
+            trouble = "todo was not found; reinstall with: make bar-install"
+            refreshMenu()
             return
         }
         self.bridge = bridge
@@ -149,13 +152,6 @@ final class Bar: NSObject, NSApplicationDelegate {
         refreshMenu()
     }
 
-    private func complain(_ title: String, _ body: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = body
-        alert.alertStyle = .warning
-        alert.runModal()
-    }
 }
 
 let application = NSApplication.shared

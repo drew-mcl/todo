@@ -104,7 +104,14 @@ final class Bridge {
         if let saved = UserDefaults.standard.string(forKey: "binary") {
             candidates.append(saved)
         }
-        // Next to the .app, which is where `make bar` leaves it.
+        // Inside the bundle, where `make bar` puts it. A GUI application is
+        // handed a bare environment -- no shell, no PATH, and a login shell
+        // will not read the file that sets one -- so the only reliable answer
+        // is the one that travels with the app.
+        if let beside = Bundle.main.executableURL?.deletingLastPathComponent() {
+            candidates.append(beside.appendingPathComponent("todo").path)
+        }
+        // And next to it, for a bar that was built but not installed.
         let bundle = Bundle.main.bundleURL.deletingLastPathComponent()
         candidates.append(bundle.appendingPathComponent("todo").path)
         candidates += [

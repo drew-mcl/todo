@@ -36,6 +36,7 @@ bar: build
 		-sdk $$(xcrun --show-sdk-path) \
 		-framework AppKit -framework Carbon \
 		-o "$(APP)/Contents/MacOS/todo-capture" mac/Sources/*.swift
+	@cp todo "$(APP)/Contents/MacOS/todo"
 	@cp todo mac/build/todo
 	@touch "$(APP)"
 	@echo "built $(APP) -- open it, then press ⌥Space"
