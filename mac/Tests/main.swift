@@ -124,6 +124,27 @@ bridge.send("hello") { reply in
               topics == ["prod issue", "prod issue"], topics.description)
         check("a topic gets exactly one colour", hues.count == 1, hues.description)
 
+        // ── the keys ────────────────────────────────────────────────────
+        //
+        // Closing is filing, so the mapping that decides it is worth stating
+        // back: esc files, ⌘⌫ throws away, and neither can quietly become the
+        // other.
+        func press(_ code: UInt16, command: Bool = false,
+                   inTitle: Bool = false, canTakeBack: Bool = true) -> Press {
+            Keys.press(code: code, command: command, inTitle: inTitle, canTakeBack: canTakeBack)
+        }
+        check("esc files, because it is the way out", press(Keys.escape) == .file)
+        check("⌘↵ files too", press(Keys.enter, command: true) == .file)
+        check("⌘⌫ throws the draft away", press(Keys.backspace, command: true) == .scrap)
+        check("a bare ⌫ does not", press(Keys.backspace) == .pass)
+        check("esc leaves the name of the call before the window",
+              press(Keys.escape, inTitle: true) == .leaveTitle)
+        check("⌘Z takes back what the window last did",
+              press(Keys.z, command: true) == .reverse)
+        check("⌘Z is the text view's own with nothing to take back",
+              press(Keys.z, command: true, canTakeBack: false) == .pass)
+        check("a plain ↵ is a new line, not a filing", press(Keys.enter) == .pass)
+
         bridge.stop()
         finish()
     }

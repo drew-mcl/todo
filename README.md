@@ -115,8 +115,14 @@ you — including full-screen apps, and on whatever Space you happen to be on �
 and puts you back where you were when it closes.
 
 It is the same box as the one in the terminal: your shorthand on top, what it
-becomes underneath, re-read on every keystroke. `⌘↵` files it, `esc` puts it
-away, `⌘Z` takes back what you just added.
+becomes underneath, re-read on every keystroke.
+
+Closing is filing. A capture box you have finished with is a capture box whose
+contents you meant, so `esc` — the way out — files what you wrote and puts you
+back. Throwing it away is the keystroke you have to mean: `⌘⌫`. Either way `⌘Z`
+puts it back, tasks off the list and words back in the box, so nothing here
+costs more than one keystroke to undo. A draft with nothing fileable in it is
+kept rather than filed or lost.
 
 Clicking away does not close it and does not empty it. Going to fetch the thing
 you were about to paste should not cost you what you have already written.

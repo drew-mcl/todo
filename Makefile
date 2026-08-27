@@ -7,6 +7,8 @@
 
 APP    = mac/build/todo capture.app
 BAR_ID = com.drew-mcl.todo.capture
+# Every source but the app's own entry point, which a test replaces.
+BAR_LIB = $(filter-out mac/Sources/main.swift,$(wildcard mac/Sources/*.swift))
 
 .PHONY: all build ui bar bar-install bar-uninstall test test-go test-ui test-bar dev clean install
 
@@ -68,16 +70,15 @@ test-go:
 test-ui:
 	cd ui && npm test && npx tsc --noEmit
 
-## test-bar: the parts of the capture bar that do not need a screen (needs Swift)
+SWIFT = swiftc -swift-version 5 -target $(shell uname -m)-apple-macos13 \
+	-sdk $(shell xcrun --show-sdk-path) -framework AppKit -framework Carbon
+
+## test-bar: the capture bar, against a live bridge (needs Swift)
 test-bar: build
 	@mkdir -p mac/build
-	swiftc -swift-version 5 \
-		-target $$(uname -m)-apple-macos13 \
-		-sdk $$(xcrun --show-sdk-path) \
-		-framework AppKit -framework Carbon \
-		-o mac/build/bar-test \
+	$(SWIFT) -o mac/build/bar-test \
 		mac/Sources/Bridge.swift mac/Sources/Theme.swift mac/Sources/Render.swift \
-		mac/Tests/main.swift
+		mac/Sources/Keys.swift mac/Tests/main.swift
 	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db mac/build/bar-test
 
 ## dev: API on 8765, Vite on 5173 proxying to it
