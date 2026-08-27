@@ -353,3 +353,86 @@ func TestDittoDoesNotSwallowRealTopics(t *testing.T) {
 		t.Errorf("topic = %q, want the explicit one to win", r.Tasks[1].Topic)
 	}
 }
+
+// A line copied out of a rendered table, a chat client or a word processor
+// brings look-alike characters with it. A separator that is not U+007C reads as
+// no separator at all: the line is skipped, and the grammar looks broken when
+// the only thing wrong is where the text came from.
+func TestPasteBringsLookalikes(t *testing.T) {
+	cases := []struct{ name, line string }{
+		{"fullwidth bar", "prod issue ｜ chase the vendor ｜ today"},
+		{"broken bar", "prod issue ¦ chase the vendor ¦ today"},
+		{"box drawing bar", "prod issue │ chase the vendor │ today"},
+		{"heavy box bar", "prod issue ┃ chase the vendor ┃ today"},
+		{"double box bar", "prod issue ║ chase the vendor ║ today"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := Parse(c.line, now)
+			if len(res.Tasks) != 1 {
+				t.Fatalf("%q was not read as a task: %s", c.line, res.Lines[0].Reason)
+			}
+			got := res.Tasks[0]
+			if got.Topic != "prod issue" || got.Title != "chase the vendor" {
+				t.Errorf("read as topic %q title %q", got.Topic, got.Title)
+			}
+			if got.Due == nil {
+				t.Error("the date in the last segment was not read")
+			}
+		})
+	}
+}
+
+// A byte order mark on the front of a paste is invisible, and used to make a
+// second copy of a topic you already had -- same word, different colour.
+func TestPasteBringsInvisibleCharacters(t *testing.T) {
+	got := Parse("\ufeffprod issue | chase the vendor @sam", now)
+	if len(got.Tasks) != 1 {
+		t.Fatal("the line was not read as a task")
+	}
+	if got.Tasks[0].Topic != "prod issue" {
+		t.Errorf("a byte order mark ended up in the topic: %q", got.Tasks[0].Topic)
+	}
+	if got.Tasks[0].Assignee != "sam" {
+		t.Errorf("assignee is %q", got.Tasks[0].Assignee)
+	}
+}
+
+// The highlighter splits on plain spaces only, so a no-break space in front of
+// a token used to colour it as part of the word before it -- the capture box
+// disagreeing with what was about to be stored.
+func TestNoBreakSpacesColourTheSame(t *testing.T) {
+	var who int
+	for _, tok := range Highlight("prod issue | chase the vendor @sam", now) {
+		if tok.Kind == TokWho {
+			who++
+		}
+	}
+	if who != 1 {
+		t.Error("the assignee behind a no-break space was not coloured as one")
+	}
+}
+
+// The highlighting has to agree with the parse about where the pipes are, or a
+// rewritten line would be coloured as if it were prose.
+func TestHighlightSeesTheSameBars(t *testing.T) {
+	var kinds []TokenKind
+	for _, tok := range Highlight("prod issue ｜ chase the vendor ｜ today", now) {
+		kinds = append(kinds, tok.Kind)
+	}
+	var pipes, dues int
+	for _, k := range kinds {
+		switch k {
+		case TokPipe:
+			pipes++
+		case TokDue:
+			dues++
+		}
+	}
+	if pipes != 2 {
+		t.Errorf("coloured %d separators, want 2 (%v)", pipes, kinds)
+	}
+	if dues == 0 {
+		t.Errorf("the date was not coloured as one (%v)", kinds)
+	}
+}

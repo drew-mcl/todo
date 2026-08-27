@@ -29,6 +29,9 @@ type Token struct {
 // the parser applies, so the colours in the capture box always agree with what
 // actually gets stored.
 func Highlight(raw string, now time.Time) []Token {
+	// The same rewrite the parser applies, so a pasted bar is coloured as the
+	// separator it is about to be read as rather than as plain text.
+	raw = Normalise(raw)
 	trimmed := strings.TrimSpace(raw)
 	switch {
 	case trimmed == "":

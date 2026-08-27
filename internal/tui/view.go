@@ -74,10 +74,16 @@ func (m *Model) viewList() string {
 
 // window keeps the selected line on screen, scrolling only as far as it must.
 func window(lines []string, at, room int) []string {
+	out, _ := scrollTo(lines, at, room)
+	return out
+}
+
+// scrollTo is the same, and also says where the window starts, which is how a
+// screen knows whether to admit there is more above.
+func scrollTo(lines []string, at, room int) (out []string, start int) {
 	if len(lines) <= room {
-		return lines
+		return lines, 0
 	}
-	start := 0
 	// A margin, so the selection is never pinned to the very edge.
 	const margin = 3
 	if at > room-margin {
@@ -89,7 +95,7 @@ func window(lines []string, at, room int) []string {
 	if start < 0 {
 		start = 0
 	}
-	return lines[start : start+room]
+	return lines[start : start+room], start
 }
 
 func (m *Model) header() string {
@@ -204,11 +210,26 @@ func (m *Model) statusLine() string {
 func (m *Model) viewCapture() string {
 	var b strings.Builder
 
-	right := styFaint.Render("⌃s add · tab · esc")
-	// The title input is sized in layout() to leave room for both ends; clip
-	// anyway, because a header that wraps breaks every line beneath it.
-	left := truncateStyled(styBrand.Render("capture")+"  "+m.title.View(),
+	// Which of the two fields has the keys has to be unmistakable. Tab used to
+	// move the cursor into the one-line title without saying so, and everything
+	// typed after it went in there -- which reads as the box having closed and
+	// the grammar having stopped working.
+	brand, mark := styBrand.Render("capture"), " "
+	hint := "⌃s add · tab name it · esc close"
+	if m.onTitle {
+		brand, mark = styFaint.Render("capture"), styCursor.Render(bar)
+		hint = "naming the call · tab the notes · esc back"
+	}
+	right := styFaint.Render(hint)
+	if strings.Contains(m.title.Value(), "|") {
+		// A task line in the title box is the mistake tab used to invite, so
+		// say which box it is in rather than leaving it to look like a parser
+		// that has stopped reading pipes.
+		right = styDanger.Render("that is a task line, not a title")
+	}
+	left := truncateStyled(brand+"  "+mark+m.title.View(),
 		max(10, m.width-6-lipgloss.Width(right)))
+
 	b.WriteString(m.bar(left, right) + "\n")
 	b.WriteString(gutter + m.rule() + "\n")
 	b.WriteString(m.draft.View() + "\n")
@@ -219,63 +240,122 @@ func (m *Model) viewCapture() string {
 		return b.String()
 	}
 
+	blocks, at := m.previewBlocks()
+	rows, focus := flatten(blocks, at)
+
+	// Header, two rules and the summary; the rest is preview.
+	room := max(1, m.height-m.draft.Height()-5)
+	shown, above := scrollTo(rows, focus, room)
+	below := len(rows) - above - len(shown)
+
+	b.WriteString(m.bar(styHeading.Render(m.previewSummary()), scrollMark(above, below)) + "\n")
+	b.WriteString(strings.Join(shown, "\n"))
+	return b.String()
+}
+
+// previewSummary is the count line: what the draft currently amounts to.
+func (m *Model) previewSummary() string {
 	tasks, notes, skipped := m.preview.Counts()
-	var summary []string
+	var parts []string
 	if tasks > 0 {
-		summary = append(summary, count(tasks, "task", "tasks"))
+		parts = append(parts, count(tasks, "task", "tasks"))
 	}
 	if notes > 0 {
-		summary = append(summary, count(notes, "note", "notes"))
+		parts = append(parts, count(notes, "note", "notes"))
 	}
 	if skipped > 0 {
-		summary = append(summary, fmt.Sprintf("%d skipped", skipped))
+		parts = append(parts, fmt.Sprintf("%d skipped", skipped))
 	}
-	if len(summary) == 0 {
-		summary = append(summary, "nothing yet")
+	if len(parts) == 0 {
+		parts = append(parts, "nothing yet")
 	}
-	b.WriteString(gutter + styHeading.Render(strings.ToUpper(strings.Join(summary, " · "))) + "\n")
+	return strings.ToUpper(strings.Join(parts, " · "))
+}
 
+// scrollMark admits what is off the top and the bottom of the preview, so a
+// draft longer than the screen does not look like a preview that has stopped.
+func scrollMark(above, below int) string {
+	var parts []string
+	if above > 0 {
+		parts = append(parts, "↑"+itoa(above))
+	}
+	if below > 0 {
+		parts = append(parts, "↓"+itoa(below))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return styFaint.Render(strings.Join(parts, " "))
+}
+
+// previewBlock is one input line and what the parser made of it, kept together
+// so scrolling moves a whole line's worth at a time rather than separating a
+// line from what it became.
+type previewBlock []string
+
+// previewBlocks draws the parse and reports which block belongs to the line the
+// cursor is on. The preview follows the draft: typing on the tenth line used to
+// leave the preview showing the first six, which reads as a preview that has
+// stopped working rather than one that is looking somewhere else.
+func (m *Model) previewBlocks() ([]previewBlock, int) {
 	now := m.now()
-	room := m.height - m.draft.Height() - 9
-	shown := 0
+	cursor := m.draft.Line() + 1
 
+	var out []previewBlock
+	at := 0
 	for _, line := range m.preview.Lines {
-		if shown >= room {
-			b.WriteString(gutter + styFaint.Render("…") + "\n")
-			break
-		}
 		if line.Kind == parse.KindBlank {
 			continue
+		}
+		// The nearest block at or above the cursor: a blank line has nothing of
+		// its own to show, so it holds the preview where it was.
+		if line.N <= cursor {
+			at = len(out)
+		}
+
+		// The line being typed carries the same bar the list cursor uses, so
+		// which of a page of lines is yours is never in doubt.
+		lead := func(indent int) string {
+			if line.N == cursor {
+				return styCursor.Render(bar) + strings.Repeat(" ", indent+1)
+			}
+			return gutter + strings.Repeat(" ", indent)
 		}
 
 		// The raw line is what you are typing, so it is never animated -- only
 		// what the parser made of it settles in underneath.
-		b.WriteString(gutter + m.shorthand(line.Raw) + "\n")
-		shown++
+		rows := []string{lead(0) + m.shorthand(line.Raw)}
+		p := m.anim.note(previewKey(line), now)
 
 		switch {
 		case line.Task != nil:
-			p := m.anim.note(previewKey(line), now)
-			b.WriteString(gutter + "  " +
-				ramp(p).Render(truncate(line.Task.Title, m.width-16)) +
-				"  " + m.previewMeta(line.Task, p) + "\n")
-			shown++
+			rows = append(rows, lead(2)+
+				ramp(p).Render(truncate(line.Task.Title, m.width-16))+
+				"  "+m.previewMeta(line.Task, p))
 			if line.Task.Warning != "" {
-				b.WriteString(gutter + "  " + styDanger.Render(line.Task.Warning) + "\n")
-				shown++
+				rows = append(rows, lead(2)+styDanger.Render(line.Task.Warning))
 			}
 		case line.Kind == parse.KindNote:
-			p := m.anim.note(previewKey(line), now)
-			b.WriteString(gutter + "  " + dimmed(p).Render("attached") + "\n")
-			shown++
+			rows = append(rows, lead(2)+dimmed(p).Render("attached"))
 		case line.Kind == parse.KindSkipped:
-			p := m.anim.note(previewKey(line), now)
-			b.WriteString(gutter + "  " + dimmed(p).Render(line.Reason) + "\n")
-			shown++
+			rows = append(rows, lead(2)+dimmed(p).Render(line.Reason))
 		}
+		out = append(out, rows)
 	}
 	m.anim.sweep()
-	return b.String()
+	return out, at
+}
+
+// flatten lays the blocks out as lines and says which line the focused block
+// ends on, which is the one the window has to keep on screen.
+func flatten(blocks []previewBlock, at int) (rows []string, focus int) {
+	for i, block := range blocks {
+		if i == at {
+			focus = len(rows) + len(block) - 1
+		}
+		rows = append(rows, block...)
+	}
+	return rows, focus
 }
 
 // previewKey identifies a parsed line by what it says rather than where it sits,

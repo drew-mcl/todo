@@ -69,6 +69,39 @@ var dittoMarks = map[string]bool{
 	"":   true,
 }
 
+// lookalikes are the characters that arrive instead of the ones the grammar
+// wants. A separator that is not U+007C reads as no separator at all: the line
+// is skipped, and the grammar looks broken when the only thing wrong is where
+// the text was copied from.
+//
+// Rendered tables give box-drawing bars and phones give the fullwidth one. The
+// spaces and the invisibles are here for the same reason: a no-break space is
+// whitespace to the parser but not to the highlighter, which is how the colours
+// in the capture box come to disagree with what is about to be stored, and a
+// byte order mark on the front of a paste makes a second copy of a topic you
+// already had -- the same word, in a different colour.
+var lookalikes = strings.NewReplacer(
+	"\uff5c", "|", // fullwidth vertical line
+	"\u00a6", "|", // broken bar
+	"\u2502", "|", // box drawings light vertical
+	"\u2503", "|", // box drawings heavy vertical
+	"\u2551", "|", // box drawings double vertical
+	"\u2223", "|", // divides
+	"\u2758", "|", // light vertical bar
+	"\u23d0", "|", // vertical line extension
+	"\u00a0", " ", // no-break space
+	"\u2007", " ", // figure space
+	"\u202f", " ", // narrow no-break space
+	"\u200b", "", // zero-width space
+	"\ufeff", "", // byte order mark
+	"\r\n", "\n",
+)
+
+// Normalise rewrites the characters a paste brings with it into the ones the
+// grammar reads. Everything that reads a line goes through it, so the parser
+// and the highlighting cannot disagree about where the pipes are.
+func Normalise(s string) string { return lookalikes.Replace(s) }
+
 // Task is one parsed action item.
 type Task struct {
 	Topic    string
@@ -124,7 +157,7 @@ func Parse(input string, now time.Time) *Result {
 	var prev *Task       // the task a following "> note" line attaches to
 	var lastTopic string // survives blank lines, so ditto still reaches back
 
-	for i, raw := range strings.Split(strings.ReplaceAll(input, "\r\n", "\n"), "\n") {
+	for i, raw := range strings.Split(Normalise(input), "\n") {
 		line := Line{N: i + 1, Raw: raw}
 		trimmed := strings.TrimSpace(raw)
 

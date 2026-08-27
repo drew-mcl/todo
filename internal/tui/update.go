@@ -151,11 +151,11 @@ func (m *Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // openCapture, openEdit and openWeek are the bindings that change mode.
 
 func (m *Model) openCapture() tea.Cmd {
-	m.mode, m.cameFrom, m.onTitle = modeCapture, m.mode, false
-	m.draft.Focus()
+	m.mode, m.cameFrom = modeCapture, m.mode
+	focus := m.focusDraft()
 	m.layout()
 	m.preview = parse.Parse(m.draft.Value(), m.now())
-	return tea.Batch(textarea.Blink, tick())
+	return tea.Batch(focus, textarea.Blink, tick())
 }
 
 func (m *Model) openEdit() tea.Cmd { return m.editTask(m.current()) }
@@ -268,38 +268,73 @@ func (m *Model) undoLast() tea.Cmd {
 func (m *Model) updateCapture(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		// The draft stays in the box, so reopening picks up where you left off.
+		// Esc steps back before it steps out. It used to close the whole box
+		// from the title, which -- with nothing on screen saying the title had
+		// the keys in the first place -- looked like the notes being thrown
+		// away rather than the cursor being somewhere else.
+		if m.onTitle {
+			return m, m.focusDraft()
+		}
 		m.mode = m.cameFrom
 		m.draft.Blur()
 		m.title.Blur()
+		// The draft stays in the box, so reopening picks up where you left off.
+		// Worth saying, because nothing else on the screen shows it survived.
+		if strings.TrimSpace(m.draft.Value()) != "" {
+			m.say("draft kept · n to pick it up")
+		}
 		return m, nil
 
 	case "ctrl+s":
 		return m, m.commit()
 
-	case "tab":
-		m.onTitle = !m.onTitle
+	case "tab", "shift+tab":
 		if m.onTitle {
-			m.draft.Blur()
-			m.title.Focus()
-		} else {
-			m.title.Blur()
-			m.draft.Focus()
+			return m, m.focusDraft()
 		}
-		return m, nil
+		return m, m.focusTitle()
+
+	case "enter":
+		// A one-line field should hand the keys on rather than swallow them.
+		if m.onTitle {
+			return m, m.focusDraft()
+		}
 	}
 
 	var cmd tea.Cmd
 	if m.onTitle {
 		m.title, cmd = m.title.Update(msg)
-	} else {
-		m.draft, cmd = m.draft.Update(msg)
-		// Re-read on every keystroke. The parse is cheap, and watching a line
-		// become a task is the whole point of the box.
-		m.preview = parse.Parse(m.draft.Value(), m.now())
-		return m, tea.Batch(cmd, tick())
+		return m, cmd
 	}
-	return m, cmd
+
+	m.draft, cmd = m.draft.Update(msg)
+	if msg.Paste {
+		// The textarea repositions its own viewport against the content of the
+		// last render, so a paste -- which arrives as a single message -- lands
+		// with the cursor below the fold. Rendering refreshes that content and
+		// the empty update that follows scrolls to where the cursor now is.
+		_ = m.draft.View()
+		m.draft, _ = m.draft.Update(nil)
+	}
+	// Re-read on every keystroke. The parse is cheap, and watching a line
+	// become a task is the whole point of the box.
+	m.preview = parse.Parse(m.draft.Value(), m.now())
+	return m, tea.Batch(cmd, tick())
+}
+
+// focusDraft and focusTitle move the keys between the two boxes. Focus is drawn
+// as well as held: see viewCapture.
+
+func (m *Model) focusDraft() tea.Cmd {
+	m.onTitle = false
+	m.title.Blur()
+	return m.draft.Focus()
+}
+
+func (m *Model) focusTitle() tea.Cmd {
+	m.onTitle = true
+	m.draft.Blur()
+	return m.title.Focus()
 }
 
 func (m *Model) commit() tea.Cmd {
