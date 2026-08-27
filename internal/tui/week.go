@@ -190,9 +190,9 @@ func (m *Model) viewWeek() string {
 		styFaint.Render(strings.ToLower(weekRange(m.plan)))) + "\n")
 	b.WriteString(gutter + m.rule() + "\n")
 
-	lines, at := m.weekLines()
+	blocks, at := m.weekBlocks()
 	room := max(1, m.height-6)
-	lines = window(lines, at, room)
+	lines, _, _ := paint(blocks, at, room)
 	b.WriteString(strings.Join(lines, "\n"))
 	if pad := room - len(lines); pad > 0 {
 		b.WriteString(strings.Repeat("\n", pad))
@@ -203,17 +203,19 @@ func (m *Model) viewWeek() string {
 	return b.String()
 }
 
-func (m *Model) weekLines() ([]string, int) {
+// weekBlocks lays the board out as measurable pieces and reports which one the
+// cursor sits on, so only the days on screen are drawn.
+func (m *Model) weekBlocks() ([]block, int) {
 	if m.plan == nil {
-		return []string{"", gutter + styFaint.Render("loading…")}, 0
+		rows := []string{"", gutter + styFaint.Render("loading…")}
+		return []block{{height: len(rows), draw: func() []string { return rows }}}, 0
 	}
 
-	var out []string
+	var blocks []block
 	at, index := 0, 0
 	today := truncateDay(m.now())
 
 	day := func(heading string, tasks []*store.Task, tone string) {
-		out = append(out, "")
 		head := styHeading.Render(strings.ToUpper(heading))
 		switch tone {
 		case "today":
@@ -224,17 +226,22 @@ func (m *Model) weekLines() ([]string, int) {
 		if len(tasks) > 0 {
 			head += styFaint.Render(fmt.Sprintf("  %d", len(tasks)))
 		}
-		out = append(out, gutter+head)
-
+		rows := []string{"", gutter + head}
 		if len(tasks) == 0 {
-			out = append(out, gutter+"    "+styFaint.Render("—"))
-			return
+			rows = append(rows, gutter+"    "+styFaint.Render("—"))
 		}
+		blocks = append(blocks, block{height: len(rows), draw: func() []string { return rows }})
+
 		for _, t := range tasks {
 			if index == m.cursor {
-				at = len(out)
+				at = len(blocks)
 			}
-			out = append(out, m.weekTask(t, index == m.cursor)...)
+			selected := index == m.cursor
+			// The row and its meta line, which is what block draws.
+			blocks = append(blocks, block{
+				height: 2,
+				draw:   func() []string { return m.weekTask(t, selected) },
+			})
 			index++
 		}
 	}
@@ -256,7 +263,7 @@ func (m *Model) weekLines() ([]string, int) {
 
 	day("overdue", m.plan.Overdue, "late")
 	day("unscheduled", m.plan.Unscheduled, "")
-	return out, at
+	return blocks, at
 }
 
 func (m *Model) weekTask(t *store.Task, selected bool) []string {

@@ -4,3 +4,7 @@
 *.db-wal
 node_modules/
 mac/build/
+
+# Test binaries and profiles, which -cpuprofile leaves behind.
+*.test
+*.out

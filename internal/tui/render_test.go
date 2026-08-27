@@ -873,3 +873,71 @@ func TestCaptureKeysAreDocumented(t *testing.T) {
 		}
 	}
 }
+
+// A block that lies about its height scrolls the screen to the wrong place, and
+// nothing else would catch it: the window would simply show the wrong rows.
+func TestBlocksMeasureWhatTheyDraw(t *testing.T) {
+	measure := func(name string, blocks []block) {
+		t.Helper()
+		for i, b := range blocks {
+			if got := len(b.draw()); got != b.height {
+				t.Errorf("%s block %d says it is %d rows and draws %d",
+					name, i, b.height, got)
+			}
+		}
+	}
+
+	// A list with sections, notes and a multi-line note among them.
+	m, _ := screen(t)
+	blocks, _ := m.listBlocks()
+	if len(blocks) < 2 {
+		t.Fatal("the seeded list produced no blocks to measure")
+	}
+	measure("list", blocks)
+
+	m.run(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	weekBlocks, _ := m.weekBlocks()
+	measure("week", weekBlocks)
+
+	// And the preview, which has a block shape for each kind of line: a task, a
+	// note, a skipped line and a task carrying a warning.
+	c := capture(t, "prod issue | chase the vendor | today @sam\n> a note under it\nnot a task line\n| \"\" | nothing above this to repeat")
+	previewBlocks, _ := c.previewBlocks()
+	if len(previewBlocks) != 4 {
+		t.Fatalf("expected four preview blocks, got %d", len(previewBlocks))
+	}
+	measure("preview", previewBlocks)
+}
+
+// Scrolling has to keep the selection on screen without drawing the whole page
+// to find out where it is.
+func TestPaintDrawsOnlyWhatFits(t *testing.T) {
+	drawn := 0
+	blocks := make([]block, 100)
+	for i := range blocks {
+		blocks[i] = block{height: 2, draw: func() []string {
+			drawn++
+			return []string{"a", "b"}
+		}}
+	}
+
+	rows, above, below := paint(blocks, 90, 10)
+	if len(rows) != 10 {
+		t.Errorf("filled %d rows of 10", len(rows))
+	}
+	if above+len(rows)+below != 200 {
+		t.Errorf("%d above + %d shown + %d below is not 200", above, len(rows), below)
+	}
+	if drawn > 8 {
+		t.Errorf("drew %d blocks to show five", drawn)
+	}
+
+	// The top of the list needs no scrolling and admits nothing above it.
+	if _, above, _ := paint(blocks, 0, 10); above != 0 {
+		t.Errorf("the first block is %d rows down", above)
+	}
+	// A list that fits is not scrolled at all.
+	if _, above, below := paint(blocks[:4], 3, 10); above != 0 || below != 0 {
+		t.Errorf("a short list reported %d above and %d below", above, below)
+	}
+}

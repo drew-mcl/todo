@@ -13,19 +13,43 @@ import (
 // The counts and groupings the sidebar is made of.
 
 // Counts returns the number of tasks behind each sidebar view.
+//
+// One pass over the table rather than one per view -- the sidebar is drawn on
+// every list, and six round trips to answer six counts is five more than the
+// question needs. The clauses are still the views' own: a second copy of what
+// "overdue" means is exactly how a sidebar starts disagreeing with the list it
+// is sitting next to.
 func (s *Store) Counts(now time.Time) (map[View]int, error) {
-	out := make(map[View]int, len(Views))
 	today := truncate(now).Format(dateLayout)
+
+	var (
+		counted []View
+		columns []string
+		args    []any
+	)
 	for _, v := range Views {
 		if v == ViewLogbook {
 			continue // a running total of everything ever done is just noise
 		}
-		where, args := v.where(today)
-		var n int
-		if err := s.db.QueryRow("SELECT count(*) FROM tasks WHERE "+where, args...).Scan(&n); err != nil {
-			return nil, fmt.Errorf("counting %s: %w", v, err)
-		}
-		out[v] = n
+		where, a := v.where(today)
+		counted = append(counted, v)
+		columns = append(columns, "count(*) FILTER (WHERE "+where+")")
+		args = append(args, a...)
+	}
+
+	found := make([]int, len(counted))
+	into := make([]any, len(counted))
+	for i := range found {
+		into[i] = &found[i]
+	}
+	if err := s.db.QueryRow("SELECT "+strings.Join(columns, ", ")+" FROM tasks", args...).
+		Scan(into...); err != nil {
+		return nil, fmt.Errorf("counting the views: %w", err)
+	}
+
+	out := make(map[View]int, len(counted))
+	for i, v := range counted {
+		out[v] = found[i]
 	}
 	return out, nil
 }
