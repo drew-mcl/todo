@@ -20,14 +20,29 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private var hues: [String: Int] = [:]
     private var awaiting = 0
     private var debounce: Timer?
-    private var closeTimer: Timer?
-    private var lastBatch: Int?
     private var monitor: Any?
+    private var notice: NSAttributedString?
+    private var takeBack: TakeBack?
     private var previousApp: NSRunningApplication?
 
-    /// The character range of the row the caret's line produced, so the preview
-    /// can be scrolled to it the way the terminal scrolls to it.
-    private var markedRange: NSRange?
+    /// The last thing this window did, and the draft it did it to.
+    ///
+    /// Closing files what you wrote, so there has to be one key that means "no,
+    /// put that back" -- and it has to put the words back too, not just take
+    /// the tasks off the list, or you are left retyping the thing you were
+    /// trying to correct.
+    private struct TakeBack {
+        let draft: String
+        let title: String
+        let batch: Int?   // nil when the draft was scrapped rather than filed
+        let count: Int
+        let at: Date
+    }
+
+    /// How long the offer to take it back stands. Long enough to reopen the
+    /// window and change your mind, short enough not to offer to undo something
+    /// from another conversation.
+    private static let secondThoughts: TimeInterval = 300
 
     init(bridge: Bridge) {
         self.bridge = bridge
@@ -52,10 +67,10 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         draft.setSelectedRange(NSRange(location: draft.string.utf16.count, length: 0))
         installMonitor()
         reparse()
+        offerTakeBack()
     }
 
     func hide() {
-        closeTimer?.invalidate()
         removeMonitor()
         panel.orderOut(nil)
         // Back to whatever the note was about, without a trip through the Dock.
@@ -94,28 +109,38 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     }
 
     /// Returns true when the key has been dealt with and should go no further.
+    /// What each one means is in Keys, so the mapping can be read -- and
+    /// checked -- without a window.
     private func handle(_ event: NSEvent) -> Bool {
         guard panel.isKeyWindow else { return false }
-        let command = event.modifierFlags.contains(.command)
-
-        switch event.keyCode {
-        case 53: // esc
-            hide()
-            return true
-        case 36 where command: // ⌘ return
-            commit()
-            return true
-        case 6 where command && lastBatch != nil: // ⌘z, while there is a capture to take back
-            undo()
-            return true
-        default:
+        switch Keys.press(code: event.keyCode,
+                          command: event.modifierFlags.contains(.command),
+                          inTitle: titleField.currentEditor() != nil,
+                          canTakeBack: canTakeBack) {
+        case .file:
+            fileAndClose()
+        case .scrap:
+            scrap()
+        case .reverse:
+            reverse()
+        case .leaveTitle:
+            panel.makeFirstResponder(draft)
+        case .pass:
             return false
         }
+        return true
+    }
+
+    private var canTakeBack: Bool {
+        guard let takeBack else { return false }
+        return Date().timeIntervalSince(takeBack.at) < Self.secondThoughts
     }
 
     // ── reading the draft ───────────────────────────────────────────────────
 
     func textDidChange(_ notification: Notification) {
+        // Anything the window was saying is about the draft as it was.
+        notice = nil
         // Debounced, because the answer comes from another process; short
         // enough that the parse still lands while you are looking at the line.
         debounce?.invalidate()
@@ -147,56 +172,100 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         }
     }
 
-    private func commit() {
+    /// File what the draft amounts to and get out of the way.
+    ///
+    /// A draft with nothing fileable in it is not an error and is not thrown
+    /// away: the window simply closes and keeps it, because half a thought you
+    /// have not finished typing is the thing here worth losing least.
+    private func fileAndClose() {
         guard let latest, latest.tasks > 0 else {
-            flash("nothing here contains a '|', so nothing would be filed")
+            hide()
             return
         }
-        bridge.send("capture", draft: draft.string, title: titleField.stringValue) { [weak self] reply in
+        let words = draft.string, called = titleField.stringValue
+        bridge.send("capture", draft: words, title: called) { [weak self] reply in
+            guard let self else { return }
+            if let error = reply.error {
+                // Something refused it, so the window stays and says why rather
+                // than closing over the top of the reason.
+                self.flash(error)
+                return
+            }
+            guard let added = reply.added else { return }
+            self.takeBack = TakeBack(draft: words, title: called,
+                                     batch: added.batchId, count: added.added, at: Date())
+            self.empty()
+            self.hide()
+        }
+    }
+
+    /// Throw the draft away. Recoverable for as long as second thoughts last,
+    /// because a window that empties itself on one keystroke had better be.
+    private func scrap() {
+        if !draft.string.isEmpty || !titleField.stringValue.isEmpty {
+            takeBack = TakeBack(draft: draft.string, title: titleField.stringValue,
+                                batch: nil, count: 0, at: Date())
+        }
+        empty()
+        hide()
+    }
+
+    /// Put back whatever the last keystroke did: the tasks come off the list
+    /// and the words go back in the box, which is the state you were in.
+    private func reverse() {
+        guard let previous = takeBack else { return }
+        takeBack = nil
+
+        draft.string = previous.draft
+        titleField.stringValue = previous.title
+        draft.setSelectedRange(NSRange(location: previous.draft.utf16.count, length: 0))
+        reparse()
+
+        guard let batch = previous.batch else {
+            say("put back")
+            return
+        }
+        bridge.send("undo", batch: batch) { [weak self] reply in
             guard let self else { return }
             if let error = reply.error {
                 self.flash(error)
                 return
             }
-            guard let added = reply.added else { return }
-            self.lastBatch = added.batchId
-            self.draft.string = ""
-            self.titleField.stringValue = ""
-            self.latest = nil
-            self.render()
-            self.confirm(added)
+            self.say("took back \(reply.undone ?? previous.count)")
         }
     }
 
-    private func undo() {
-        guard let batch = lastBatch else { return }
-        bridge.send("undo", batch: batch) { [weak self] reply in
-            guard let self else { return }
-            self.lastBatch = nil
-            self.closeTimer?.invalidate()
-            self.flash(reply.error ?? "put back \(reply.undone ?? 0)")
+    private func empty() {
+        draft.string = ""
+        titleField.stringValue = ""
+        latest = nil
+        hues = [:]
+        notice = nil
+        render()
+    }
+
+    /// What the window last did, offered back until you type over it.
+    private func offerTakeBack() {
+        guard canTakeBack, let takeBack else { return }
+        if takeBack.batch == nil {
+            say("scrapped · ⌘Z to put it back")
+        } else {
+            say("filed \(takeBack.count) · ⌘Z to take it back")
         }
     }
 
-    /// The window says what it did and then gets out of the way. Long enough to
-    /// read, and long enough to change your mind.
-    private func confirm(_ added: Added) {
-        let word = added.added == 1 ? "task" : "tasks"
-        summary.attributedStringValue = Render.heading("ADDED \(added.added) \(word.uppercased())")
-        hint.attributedStringValue = NSAttributedString(
-            string: "\(added.today) due today · ⌘Z to take it back",
-            attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("ink3")])
-
-        closeTimer?.invalidate()
-        closeTimer = Timer.scheduledTimer(withTimeInterval: 1.8, repeats: false) { [weak self] _ in
-            self?.hide()
-        }
+    private func say(_ message: String) {
+        notice = NSAttributedString(string: message, attributes: [
+            .font: Type.mono, .foregroundColor: Theme.shared.colour("ink3"),
+        ])
+        drawChrome()
     }
 
     private func flash(_ message: String) {
-        hint.attributedStringValue = NSAttributedString(
-            string: message,
-            attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("danger")])
+        notice = NSAttributedString(string: message, attributes: [
+            .font: Type.mono, .foregroundColor: Theme.shared.colour("danger"),
+        ])
+        drawChrome()
     }
 
     // ── drawing ─────────────────────────────────────────────────────────────
@@ -249,15 +318,17 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         summary.attributedStringValue = Render.heading(Render.summary(latest))
 
         addButton.isEnabled = (latest?.tasks ?? 0) > 0
-        addButton.title = latest.map { $0.tasks > 0 ? "add \($0.tasks)" : "add" } ?? "add"
+        addButton.title = latest.map { $0.tasks > 0 ? "file \($0.tasks)" : "file" } ?? "file"
 
         // A task line typed into the title box is the one mistake this shape of
         // window invites, so it is named rather than left to look like a parser
         // that has stopped reading pipes.
         if titleField.stringValue.contains("|") {
-            flash("that is a task line, not a title — it belongs below")
+            hint.attributedStringValue = NSAttributedString(
+                string: "that is a task line, not a title — it belongs below",
+                attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("danger")])
         } else {
-            hint.attributedStringValue = Render.grammar()
+            hint.attributedStringValue = notice ?? Render.grammar()
         }
     }
 
@@ -298,13 +369,13 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         hint.lineBreakMode = .byTruncatingTail
 
         addButton.bezelStyle = .rounded
-        addButton.title = "add"
+        addButton.title = "file"
         addButton.keyEquivalent = "\r"
         addButton.keyEquivalentModifierMask = [.command]
         addButton.target = self
         addButton.action = #selector(addPressed)
 
-        let keys = NSTextField(labelWithString: "⌘↵ add · esc close")
+        let keys = NSTextField(labelWithString: "esc file · ⌘⌫ scrap")
         keys.font = Type.mono
         keys.textColor = Theme.shared.colour("ink4")
 
@@ -361,7 +432,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         ])
     }
 
-    @objc private func addPressed() { commit() }
+    @objc private func addPressed() { fileAndClose() }
 
     @objc private func titleCommitted() { panel.makeFirstResponder(draft) }
 
