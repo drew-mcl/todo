@@ -12,6 +12,12 @@ final class Theme {
 
     var ready: Bool { !topic.isEmpty }
 
+    /// The keys the capture box answers to, as the bridge described them. The
+    /// window shows the list it was handed rather than one of its own.
+    private(set) var keys: [KeyGroup] = []
+
+    func adopt(_ keys: [KeyGroup]) { self.keys = keys }
+
     func adopt(_ palette: Palette) {
         topic = palette.topic.map(Theme.adaptive)
         scheme = palette.scheme.mapValues(Theme.adaptive)

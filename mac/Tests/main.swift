@@ -145,6 +145,70 @@ bridge.send("hello") { reply in
               press(Keys.z, command: true, canTakeBack: false) == .pass)
         check("a plain ↵ is a new line, not a filing", press(Keys.enter) == .pass)
 
+        // ── normal mode ─────────────────────────────────────────────────
+        //
+        // The sheet the window shows comes from the same list this side is
+        // meant to implement, so every key on it is pressed here. A reference
+        // that promises a key nobody wrote is worse than no reference.
+        func after(_ keys: [String], on text: String = "one two\nthree four",
+                   at: Int = 4) -> VimResult {
+            var state = VimState(text: text, at: at, mode: .normal)
+            var out = VimResult(state: state, handled: false)
+            for key in keys {
+                out = Vim.press(key, state)
+                state = out.state
+            }
+            return out
+        }
+
+        check("esc leaves typing without filing", {
+            let out = Vim.press("\u{1b}", VimState(text: "hi", at: 2, mode: .insert))
+            return out.handled && out.state.mode == .normal && out.exit == nil
+        }())
+        check("esc from normal files", after(["\u{1b}"]).exit == .file)
+        check("ZZ files, ZQ scraps",
+              after(["Z", "Z"]).exit == .file && after(["Z", "Q"]).exit == .scrap)
+        check("dd takes the line and its newline",
+              after(["d", "d"]).state.text == "three four",
+              after(["d", "d"]).state.text)
+        check("D takes the rest of the line",
+              after(["D"]).state.text == "one \nthree four", after(["D"]).state.text)
+        check("cc clears the line and types",
+              after(["c", "c"]).state.text == "\nthree four"
+                  && after(["c", "c"]).state.mode == .insert)
+        check("x takes one character", after(["x"]).state.text == "one wo\nthree four",
+              after(["x"]).state.text)
+        // "one two\nthree four", caret on the t of two: w reaches three.
+        check("w goes on to the next word", after(["w"]).state.at == 8,
+              "\(after(["w"]).state.at)")
+        check("b goes back a word", after(["b"]).state.at == 0, "\(after(["b"]).state.at)")
+        check("e reaches the end of a word", after(["e"]).state.at == 6,
+              "\(after(["e"]).state.at)")
+        check("gg and G reach the ends",
+              after(["g", "g"]).state.at == 0 && after(["G"]).state.at == 18,
+              "\(after(["G"]).state.at)")
+        check("0 and $ reach the ends of the line",
+              after(["0"]).state.at == 0 && after(["$"]).state.at == 7)
+        check("j and k hold the column",
+              after(["j"]).state.at == 12 && after(["j", "k"]).state.at == 4,
+              "\(after(["j"]).state.at)")
+        check("i a I A o O all start typing",
+              ["i", "a", "I", "A", "o", "O"].allSatisfy { after([$0]).state.mode == .insert })
+        check("a stray letter never reaches the draft", {
+            let out = after(["q"])
+            return out.handled && out.state.text == "one two\nthree four"
+        }())
+        check("every key while typing belongs to the text view",
+              ["d", "w", "x", "G", "?"].allSatisfy {
+                  !Vim.press($0, VimState(text: "", at: 0, mode: .insert)).handled
+              })
+
+        // And the sheet the window would draw is the one the bridge sent.
+        let sheet = Render.sheet(hello.keys ?? []).string
+        check("the reference names the keys it was sent",
+              !(hello.keys ?? []).isEmpty && sheet.contains("dd") && sheet.contains("gg"),
+              sheet.prefix(60).description)
+
         bridge.stop()
         finish()
     }

@@ -47,6 +47,7 @@ final class Bar: NSObject, NSApplicationDelegate {
                 return
             }
             Theme.shared.adopt(hello.palette)
+            Theme.shared.adopt(hello.keys ?? [])
             self?.capture?.repaint()
         }
 

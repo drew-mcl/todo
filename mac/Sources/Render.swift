@@ -109,6 +109,34 @@ enum Render {
         return out
     }
 
+    /// The keys the capture box answers to, as the bridge described them.
+    static func sheet(_ groups: [KeyGroup]) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        if groups.isEmpty {
+            return quiet("the keys have not arrived from todo bridge yet", "ink4")
+        }
+        for group in groups {
+            out.append(heading(group.name.uppercased()))
+            out.append(NSAttributedString(string: "\n"))
+            for key in group.keys {
+                out.append(NSAttributedString(string: pad(key.press, to: 12), attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
+                    .foregroundColor: Theme.shared.colour("accent"),
+                ]))
+                out.append(quiet(key.does, "ink3"))
+                out.append(NSAttributedString(string: "\n"))
+            }
+            out.append(NSAttributedString(string: "\n"))
+        }
+        out.append(quiet("esc stops typing · esc again files what is there · any key closes this",
+                         "ink4"))
+        return out
+    }
+
+    private static func pad(_ s: String, to n: Int) -> String {
+        s.count >= n ? s + "  " : s + String(repeating: " ", count: n - s.count)
+    }
+
     // ── one row ─────────────────────────────────────────────────────────────
 
     /// A parsed task: what it will be called, then the quiet detail.

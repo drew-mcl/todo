@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type PreviewResponse, type Token, type TokenKind } from "../api";
 import { draftStore } from "../lib/prefs";
 import { TopicDot } from "./TaskRow";
 import { TableInput } from "./TableInput";
+import { press, type Mode } from "../lib/vim";
+import { VimSheet } from "./VimSheet";
 
-type Mode = "shorthand" | "table" | "copilot";
+type Tab = "shorthand" | "table" | "copilot";
 
-const MODES: { id: Mode; label: string; hint: string }[] = [
+const TABS: { id: Tab; label: string; hint: string }[] = [
   { id: "shorthand", label: "shorthand", hint: "type or paste your notes" },
   { id: "table", label: "table", hint: "paste a tracker or spreadsheet" },
   { id: "copilot", label: "copilot", hint: "paste the summary from Teams" },
@@ -136,20 +138,34 @@ export function Capture({
   onClose: () => void;
   onAdded: (batchId: number, added: number) => void;
 }) {
-  const [mode, setMode] = useState<Mode>("shorthand");
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState(() => draftStore.read());
   const [preview, setPreview] = useState<PreviewResponse>();
+  const [tab, setTab] = useState<Tab>("shorthand");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [mode, setMode] = useState<Mode>("insert");
+  const [pending, setPending] = useState("");
+  const [sheet, setSheet] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const caret = useRef<number | null>(null);
+
+  // A normal-mode key moves the caret as well as the text, and React has just
+  // rewritten the value out from under it.
+  useLayoutEffect(() => {
+    if (caret.current === null || !ref.current) return;
+    ref.current.setSelectionRange(caret.current, caret.current);
+    caret.current = null;
+  });
 
   useEffect(() => {
-    if (!open || mode !== "shorthand") return;
+    if (!open || tab !== "shorthand") return;
+    setMode("insert");
+    setPending("");
     const el = ref.current;
     el?.focus();
     el?.setSelectionRange(el.value.length, el.value.length);
-  }, [open, mode]);
+  }, [open, tab]);
 
   // The parse is debounced but always server-side: one parser, and this is it.
   useEffect(() => {
@@ -181,6 +197,14 @@ export function Capture({
     } finally {
       setBusy(false);
     }
+  }
+
+  /// Throwing the draft away, which is the one thing closing does not do.
+  function scrap() {
+    draftStore.clear();
+    setDraft("");
+    setPreview(undefined);
+    onClose();
   }
 
   function promote(n: number) {
@@ -219,14 +243,14 @@ export function Capture({
                 className="min-w-0 flex-1 bg-transparent font-mono text-md text-ink outline-none placeholder:text-ink-4"
               />
               <div className="flex gap-0.5 rounded-md border border-line bg-sunk p-0.5">
-                {MODES.map((m) => (
+                {TABS.map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => setMode(m.id)}
+                    onClick={() => setTab(m.id)}
                     title={m.hint}
                     className={clsx(
                       "rounded-sm px-2.5 py-1 font-mono text-xs transition-colors",
-                      mode === m.id ? "bg-raised text-ink" : "text-ink-3 hover:text-ink",
+                      tab === m.id ? "bg-raised text-ink" : "text-ink-3 hover:text-ink",
                     )}
                   >
                     {m.label}
@@ -240,10 +264,10 @@ export function Capture({
               </p>
             </header>
 
-            {mode !== "shorthand" ? (
+            {tab !== "shorthand" ? (
               <TableInput
-                key={mode}
-                source={mode === "copilot" ? "copilot" : "table"}
+                key={tab}
+                source={tab === "copilot" ? "copilot" : "table"}
                 topic={title}
                 title={title}
                 placeholder=""
@@ -264,7 +288,35 @@ export function Capture({
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   void commit();
+                  return;
                 }
+                if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+                  e.preventDefault();
+                  setSheet((s) => !s);
+                  return;
+                }
+                if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+                const el = e.currentTarget;
+                const out = press(e.key, {
+                  value: el.value,
+                  at: el.selectionStart,
+                  mode,
+                  pending,
+                });
+                if (!out.handled) return;
+
+                // Ours: the overlay's own escape must not also fire.
+                e.preventDefault();
+                e.stopPropagation();
+                setMode(out.mode);
+                setPending(out.pending);
+                if (out.value !== draft) setDraft(out.value);
+                caret.current = out.at;
+
+                if (out.exit === "help") setSheet(true);
+                if (out.exit === "file") void commit();
+                if (out.exit === "scrap") scrap();
               }}
               placeholder=""
               className="min-h-[180px] flex-1 resize-none bg-transparent px-6 py-4 font-mono text-md leading-[1.8] text-ink outline-none placeholder:text-ink-4"
@@ -285,6 +337,15 @@ export function Capture({
               <span className="font-mono text-xs text-ink-4">
                 start a line with <span className="font-semibold text-ink-2">|</span> to repeat
                 the topic above
+              </span>
+              <span
+                className={clsx(
+                  "rounded-xs px-1.5 py-0.5 font-mono text-2xs tracking-wide uppercase",
+                  mode === "normal" ? "bg-accent/15 text-accent" : "text-ink-4",
+                )}
+                title="esc stops typing · ⌘/ for the keys"
+              >
+                {mode}
               </span>
               {error && <span className="font-mono text-xs text-danger">{error}</span>}
               <div className="ml-auto flex items-center gap-2">
@@ -307,6 +368,7 @@ export function Capture({
             </footer>
             </>
             )}
+            <VimSheet open={sheet} onClose={() => setSheet(false)} />
           </motion.div>
         </motion.div>
       )}

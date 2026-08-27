@@ -79,7 +79,7 @@ test-bar: build
 	@mkdir -p mac/build
 	$(SWIFT) -o mac/build/bar-test \
 		mac/Sources/Bridge.swift mac/Sources/Theme.swift mac/Sources/Render.swift \
-		mac/Sources/Keys.swift mac/Tests/main.swift
+		mac/Sources/Keys.swift mac/Sources/Vim.swift mac/Tests/main.swift
 	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db mac/build/bar-test
 
 ## dev: API on 8765, Vite on 5173 proxying to it

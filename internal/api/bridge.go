@@ -10,6 +10,7 @@ import (
 	"github.com/drew-mcl/todo/internal/palette"
 	"github.com/drew-mcl/todo/internal/parse"
 	"github.com/drew-mcl/todo/internal/store"
+	"github.com/drew-mcl/todo/internal/vim"
 )
 
 // The capture bar is a native window, so it cannot be served a page and it
@@ -50,6 +51,9 @@ type BridgeHello struct {
 	Version string         `json:"version"`
 	Palette BridgePalette  `json:"palette"`
 	Counts  map[string]int `json:"counts"`
+	// The keys the capture box answers to, so the window's reference sheet and
+	// the browser's are the same sheet.
+	Keys []vim.Group `json:"keys"`
 }
 
 // BridgePalette is internal/palette on the wire. The bar holds no colours of
@@ -121,6 +125,7 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 			Version: bridgeVersion,
 			Palette: wirePalette(),
 			Counts:  countsDTO(counts),
+			Keys:    vim.Reference(),
 		}
 
 	case "preview":

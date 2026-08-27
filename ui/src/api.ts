@@ -191,7 +191,11 @@ export function toQuery(f: Filters): string {
 const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 
+/** One key in the capture box, and the group it is shown under. */
+export type KeyGroup = { name: string; keys: { press: string; does: string }[] };
+
 export const api = {
+  keys: () => request<{ vim: KeyGroup[] }>("/api/keys").then((r) => r.vim),
   list: (f: Filters) => request<ListResponse>(`/api/list${toQuery(f)}`),
   week: (f: Filters) => request<WeekResponse>(`/api/week${toQuery(f)}`),
   preview: (draft: string) => post<PreviewResponse>("/api/preview", { draft }),

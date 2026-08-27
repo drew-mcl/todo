@@ -22,6 +22,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private var debounce: Timer?
     private var monitor: Any?
     private var notice: NSAttributedString?
+    private var vim = VimState(text: "", at: 0)
+    private var sheet: NSTextView?
     private var takeBack: TakeBack?
     private var previousApp: NSRunningApplication?
 
@@ -65,6 +67,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(draft)
         draft.setSelectedRange(NSRange(location: draft.string.utf16.count, length: 0))
+        vim = VimState(text: draft.string, at: draft.selectedRange().location)
+        showMode()
         installMonitor()
         reparse()
         offerTakeBack()
@@ -113,8 +117,24 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     /// checked -- without a window.
     private func handle(_ event: NSEvent) -> Bool {
         guard panel.isKeyWindow else { return false }
+        if showingSheet {
+            // Anything at all puts the reference away.
+            hideSheet()
+            return true
+        }
+        let command = event.modifierFlags.contains(.command)
+        if command && event.charactersIgnoringModifiers == "/" {
+            showSheet()
+            return true
+        }
+        // Normal mode has the keyboard before the window's own bindings do,
+        // and hands back the two that mean leaving.
+        if !command, titleField.currentEditor() == nil, let typed = event.characters,
+           vim.mode == .normal || typed == "\u{1b}" {
+            if runVim(typed) { return true }
+        }
         switch Keys.press(code: event.keyCode,
-                          command: event.modifierFlags.contains(.command),
+                          command: command,
                           inTitle: titleField.currentEditor() != nil,
                           canTakeBack: canTakeBack) {
         case .file:
@@ -129,6 +149,48 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
             return false
         }
         return true
+    }
+
+    /// Hand a keystroke to normal mode and put back what comes out. Returns
+    /// false when the key was not its business.
+    private func runVim(_ typed: String) -> Bool {
+        vim.text = draft.string
+        vim.at = draft.selectedRange().location
+
+        let out = Vim.press(typed, vim)
+        guard out.handled else { return false }
+        vim = out.state
+
+        if out.state.text != draft.string {
+            // Through the text view, so its own undo still holds the line you
+            // just deleted.
+            let whole = NSRange(location: 0, length: (draft.string as NSString).length)
+            if draft.shouldChangeText(in: whole, replacementString: out.state.text) {
+                draft.textStorage?.replaceCharacters(in: whole, with: out.state.text)
+                draft.didChangeText()
+            }
+        }
+        draft.setSelectedRange(NSRange(location: min(out.state.at, (draft.string as NSString).length),
+                                       length: 0))
+        showMode()
+
+        switch out.exit {
+        case .file: fileAndClose()
+        case .scrap: scrap()
+        case .help: showSheet()
+        case nil: break
+        }
+        return true
+    }
+
+    /// A block caret in normal mode, a bar while typing: the way an editor says
+    /// which one it is in without a word.
+    private func showMode() {
+        let normal = vim.mode == .normal
+        draft.insertionPointColor = Theme.shared.colour(normal ? "accent" : "ink")
+        summary.attributedStringValue = Render.heading(
+            normal ? "NORMAL · " + Render.summary(latest) : Render.summary(latest))
+        drawChrome()
     }
 
     private var canTakeBack: Bool {
@@ -330,6 +392,40 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         } else {
             hint.attributedStringValue = notice ?? Render.grammar()
         }
+    }
+
+    // ── the reference ───────────────────────────────────────────────────────
+
+    private var showingSheet: Bool { sheet?.isHidden == false }
+
+    /// The keys, over the top of the box, from the list the bridge handed over.
+    /// Any key at all puts it away again.
+    private func showSheet() {
+        let view = sheet ?? {
+            let (scroll, text) = Self.textView(editable: false)
+            text.textContainerInset = NSSize(width: 24, height: 20)
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            scroll.drawsBackground = true
+            scroll.backgroundColor = Theme.shared.colour("sunk")
+            panel.contentView?.addSubview(scroll)
+            NSLayoutConstraint.activate([
+                scroll.topAnchor.constraint(equalTo: panel.contentView!.topAnchor),
+                scroll.bottomAnchor.constraint(equalTo: panel.contentView!.bottomAnchor),
+                scroll.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor),
+                scroll.trailingAnchor.constraint(equalTo: panel.contentView!.trailingAnchor),
+            ])
+            sheet = text
+            return text
+        }()
+        view.textStorage?.setAttributedString(Render.sheet(Theme.shared.keys))
+        view.enclosingScrollView?.isHidden = false
+        view.isHidden = false
+    }
+
+    private func hideSheet() {
+        sheet?.isHidden = true
+        sheet?.enclosingScrollView?.isHidden = true
+        panel.makeFirstResponder(draft)
     }
 
     // ── layout ──────────────────────────────────────────────────────────────

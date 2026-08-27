@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/drew-mcl/todo/internal/store"
+	"github.com/drew-mcl/todo/internal/vim"
 )
 
 // Server routes the JSON API and, behind it, the built client.
@@ -45,6 +46,7 @@ func (s *Server) routes(client http.Handler) {
 	s.mux.HandleFunc("POST /api/table/capture", s.handleTableCapture)
 	s.mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	s.mux.HandleFunc("GET /api/export", s.handleExportAll)
+	s.mux.HandleFunc("GET /api/keys", s.handleKeys)
 	s.mux.HandleFunc("POST /api/sessions/{id}/rename", s.handleRenameSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/capture", s.handleCapture)
@@ -62,6 +64,13 @@ func (s *Server) routes(client http.Handler) {
 	if client != nil {
 		s.mux.Handle("/", client)
 	}
+}
+
+// handleKeys serves the capture box's normal-mode keys. The browser and the
+// desktop window draw their reference from the same list they are each meant to
+// implement, so a sheet cannot promise a key nobody wrote.
+func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
+	s.json(w, map[string]any{"vim": vim.Reference()})
 }
 
 func (s *Server) json(w http.ResponseWriter, v any) {

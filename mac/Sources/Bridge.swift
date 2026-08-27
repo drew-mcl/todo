@@ -17,10 +17,20 @@ struct Palette: Decodable {
     let scheme: [String: Colour]
 }
 
+struct KeyGroup: Decodable {
+    struct Key: Decodable {
+        let press: String
+        let does: String
+    }
+    let name: String
+    let keys: [Key]
+}
+
 struct Hello: Decodable {
     let version: String
     let palette: Palette
     let counts: [String: Int]
+    let keys: [KeyGroup]?
 }
 
 struct Token: Decodable {
