@@ -270,7 +270,9 @@ func (t *Table) Tasks(now time.Time, defaultTopic string) []TableRow {
 
 func splitLines(s string) []string {
 	var out []string
-	for _, l := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+	// A grid copied out of a chat client or a document arrives full of
+	// look-alike bars and no-break spaces; the same rewrite the shorthand gets.
+	for _, l := range strings.Split(Normalise(s), "\n") {
 		if strings.TrimSpace(l) != "" {
 			out = append(out, l)
 		}

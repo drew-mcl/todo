@@ -626,3 +626,165 @@ func TestEveryBindingRuns(t *testing.T) {
 		}
 	}
 }
+
+// press feeds a key straight in. Capture is all synchronous state, so the
+// commands -- a cursor blink on a real timer -- are not worth following.
+func (m *Model) press(msg tea.Msg) { m.Update(msg) }
+
+func (m *Model) typeIn(s string) {
+	for _, r := range s {
+		m.press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+}
+
+// capture builds a capture box holding draft, the way a paste would leave it.
+func capture(t *testing.T, draft string) *Model {
+	t.Helper()
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	m := New(st, func() time.Time { return now })
+	m.Update(tea.WindowSizeMsg{Width: 92, Height: 30})
+	m.press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m.press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(draft), Paste: true})
+	return m
+}
+
+// previewOf is the half of the capture screen below the second rule: what the
+// draft is becoming, as opposed to the draft itself.
+func previewOf(m *Model) string {
+	lines := strings.Split(plain(m.View()), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], "────") {
+			return strings.Join(lines[i+1:], "\n")
+		}
+	}
+	return ""
+}
+
+const pasted = `prod issue | chase the vendor about the patch | today @sam !!
+> they have missed two dates now
+| write the postmortem | eow #board
+admin | quarterly compliance training | today #compliance
+finance want the numbers before friday
+some tool | overview tab shows the stale value @jo
+platform | decide the ingest lag fix | today !!!
+personal | book the dentist
+ops | rotate the certs | +3d
+ops | check the backups | fri`
+
+// The preview used to draw from the first line every time and stop when it ran
+// out of room, so a draft longer than half the screen showed you the parse of
+// something you had typed several minutes ago.
+func TestPreviewFollowsTheCursor(t *testing.T) {
+	m := capture(t, pasted)
+
+	if got := m.draft.Line(); got != 9 {
+		t.Fatalf("the paste left the cursor on line %d, not the last one", got)
+	}
+	text := previewOf(m)
+	if !strings.Contains(text, "check the backups") {
+		t.Errorf("the preview does not reach the line being typed:\n%s", text)
+	}
+	if !strings.Contains(plain(m.View()), "↑") {
+		t.Error("the preview scrolled without admitting there is more above it")
+	}
+
+	// Back to the top, and the preview should come with it.
+	for range 9 {
+		m.press(tea.KeyMsg{Type: tea.KeyUp})
+	}
+	text = previewOf(m)
+	if !strings.Contains(text, "chase the vendor about the patch") {
+		t.Errorf("the preview did not follow the cursor back up:\n%s", text)
+	}
+	if !strings.Contains(plain(m.View()), "↓") {
+		t.Error("the preview does not admit there is more below it")
+	}
+}
+
+// The line being typed is marked, so which of a page of previews is yours is
+// never in doubt.
+func TestPreviewMarksTheLineBeingTyped(t *testing.T) {
+	m := capture(t, "admin | pull the numbers | eow\nops | rotate the certs")
+
+	var marked, plainly int
+	for _, line := range strings.Split(previewOf(m), "\n") {
+		switch {
+		case strings.HasPrefix(line, bar):
+			marked++
+		case strings.TrimSpace(line) != "":
+			plainly++
+		}
+	}
+	if marked == 0 {
+		t.Errorf("the line under the cursor is not marked:\n%s", previewOf(m))
+	}
+	if plainly == 0 {
+		t.Errorf("every line is marked, so the mark says nothing:\n%s", previewOf(m))
+	}
+}
+
+// A paste longer than the box used to leave the cursor below the fold, so what
+// you had just pasted was off screen in both halves at once.
+func TestPasteScrollsToTheCursor(t *testing.T) {
+	m := capture(t, pasted)
+	if !strings.Contains(plain(m.draft.View()), "check the backups") {
+		t.Errorf("the draft is not scrolled to the cursor:\n%s", plain(m.draft.View()))
+	}
+}
+
+// Tab moved the keys into the one-line title without saying so, which reads as
+// the box having closed -- and everything typed after it, pipes and all, went
+// into the title.
+func TestCaptureShowsWhichBoxHasTheKeys(t *testing.T) {
+	m := capture(t, "admin | pull the numbers")
+	if strings.Contains(plain(m.View()), "naming the call") {
+		t.Error("the draft has the keys but the header says the title does")
+	}
+
+	m.press(tea.KeyMsg{Type: tea.KeyTab})
+	if !m.onTitle {
+		t.Fatal("tab did not reach the title")
+	}
+	if !strings.Contains(plain(m.View()), "naming the call") {
+		t.Errorf("nothing on screen says the title has the keys:\n%s", plain(m.View()))
+	}
+
+	// A pipe in the title is the mistake tab used to invite.
+	m.typeIn("prod issue | oops")
+	if !strings.Contains(plain(m.View()), "not a title") {
+		t.Error("a task line typed into the title goes unremarked")
+	}
+	if strings.Contains(m.draft.Value(), "oops") {
+		t.Error("the title's text leaked into the draft")
+	}
+}
+
+// Esc steps back before it steps out.
+func TestEscapeLeavesTheTitleBeforeTheBox(t *testing.T) {
+	m := capture(t, "admin | pull the numbers")
+	m.press(tea.KeyMsg{Type: tea.KeyTab})
+	m.press(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.mode != modeCapture {
+		t.Fatal("esc closed the box from the title instead of returning to the notes")
+	}
+	if m.onTitle {
+		t.Error("esc did not put the keys back in the notes")
+	}
+
+	m.press(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeList {
+		t.Fatal("esc did not close the box from the notes")
+	}
+	if m.draft.Value() == "" {
+		t.Fatal("closing the box threw the draft away")
+	}
+	if !strings.Contains(plain(m.View()), "draft kept") {
+		t.Error("nothing says the draft survived, which is the whole worry")
+	}
+}
