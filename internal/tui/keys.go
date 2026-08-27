@@ -55,7 +55,7 @@ var listBindings = []binding{
 	}},
 	{keys: []string{"x", " "}, help: "complete", run: (*Model).toggleCurrent},
 	{keys: []string{"e"}, help: "edit the line", run: (*Model).openEdit},
-	{keys: []string{"u"}, help: "undo the last capture", run: (*Model).undoLast},
+	{keys: []string{"u"}, help: "take back the last capture", run: (*Model).undoLast},
 	{keys: []string{"/"}, help: "search", run: func(m *Model) tea.Cmd {
 		m.onSearch = true
 		m.search.Focus()
@@ -81,6 +81,16 @@ var chordBindings = []binding{
 	{keys: []string{"g u"}, help: "upcoming"},
 	{keys: []string{"g y"}, help: "anytime"},
 	{keys: []string{"g d"}, help: "delegated"},
+}
+
+// captureBindings are the keys in the capture box. Closing is filing there, so
+// they had better be written down: they were the one set this table did not
+// cover, and the box is where the surprises were.
+var captureBindings = []binding{
+	{keys: []string{"esc", "⌃s"}, help: "file what is there and close"},
+	{keys: []string{"⌃x"}, help: "scrap the draft"},
+	{keys: []string{"tab"}, help: "name the call, and back"},
+	{keys: []string{"u"}, help: "take it back, words and all"},
 }
 
 // weekBindings only mean something on the planner.

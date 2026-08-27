@@ -252,8 +252,8 @@ func TestCaptureShowsTheParse(t *testing.T) {
 			t.Errorf("the capture preview is missing %q:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "⌃s add") {
-		t.Error("the capture box does not say how to commit")
+	if !strings.Contains(text, "esc file") {
+		t.Error("the capture box does not say what leaving it does")
 	}
 }
 
@@ -776,15 +776,100 @@ func TestEscapeLeavesTheTitleBeforeTheBox(t *testing.T) {
 	if m.onTitle {
 		t.Error("esc did not put the keys back in the notes")
 	}
+}
 
-	m.press(tea.KeyMsg{Type: tea.KeyEsc})
+// Closing is filing, in the terminal as on the desktop: a box you have finished
+// with is a box whose contents you meant.
+func TestEscapeFilesTheDraft(t *testing.T) {
+	m := capture(t, "admin | pull the numbers | today")
+	m.run(tea.KeyMsg{Type: tea.KeyEsc})
+
 	if m.mode != modeList {
-		t.Fatal("esc did not close the box from the notes")
+		t.Fatal("esc did not close the box")
 	}
-	if m.draft.Value() == "" {
-		t.Fatal("closing the box threw the draft away")
+	tasks, _ := m.store.List(store.Query{View: store.ViewAll}, now)
+	if len(tasks) != 1 || tasks[0].Title != "pull the numbers" {
+		t.Fatalf("esc filed %v", tasks)
+	}
+	if m.draft.Value() != "" {
+		t.Errorf("the box still holds %q", m.draft.Value())
+	}
+	if !strings.Contains(plain(m.View()), "filed 1") {
+		t.Errorf("nothing says what was filed:\n%s", plain(m.View()))
+	}
+}
+
+// Half a thought is the thing here worth losing least, so a draft with nothing
+// fileable in it is neither filed nor thrown away.
+func TestEscapeKeepsWhatItCannotFile(t *testing.T) {
+	m := capture(t, "half a thought with no separator yet")
+	m.run(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.mode != modeList {
+		t.Fatal("esc did not close the box")
+	}
+	if m.draft.Value() != "half a thought with no separator yet" {
+		t.Errorf("the draft came back as %q", m.draft.Value())
+	}
+	tasks, _ := m.store.List(store.Query{View: store.ViewAll}, now)
+	if len(tasks) != 0 {
+		t.Errorf("something unfileable reached the list: %v", tasks)
 	}
 	if !strings.Contains(plain(m.View()), "draft kept") {
 		t.Error("nothing says the draft survived, which is the whole worry")
+	}
+}
+
+// Throwing it away is the keystroke you have to mean -- and it is recoverable,
+// because a box that empties itself on one keystroke had better be.
+func TestScrapThrowsItAwayAndCanBeTakenBack(t *testing.T) {
+	m := capture(t, "admin | pull the numbers | today")
+	m.run(tea.KeyMsg{Type: tea.KeyCtrlX})
+
+	if m.mode != modeList {
+		t.Fatal("ctrl+x did not close the box")
+	}
+	if m.draft.Value() != "" {
+		t.Errorf("the box still holds %q", m.draft.Value())
+	}
+	tasks, _ := m.store.List(store.Query{View: store.ViewAll}, now)
+	if len(tasks) != 0 {
+		t.Errorf("a scrapped draft was filed anyway: %v", tasks)
+	}
+
+	m.run(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	if m.draft.Value() != "admin | pull the numbers | today" {
+		t.Errorf("u did not put the words back; the box holds %q", m.draft.Value())
+	}
+}
+
+// Taking back a filing you did not want and then having to retype it is not
+// taking it back.
+func TestTakingBackReturnsTheWordsToo(t *testing.T) {
+	m := capture(t, "admin | pull the numbers | today")
+	m.run(tea.KeyMsg{Type: tea.KeyEsc})
+	m.run(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	tasks, _ := m.store.List(store.Query{View: store.ViewAll}, now)
+	if len(tasks) != 0 {
+		t.Errorf("u left %d on the list", len(tasks))
+	}
+	if m.draft.Value() != "admin | pull the numbers | today" {
+		t.Errorf("u did not put the words back; the box holds %q", m.draft.Value())
+	}
+	if !strings.Contains(plain(m.View()), "took back 1") {
+		t.Errorf("nothing says what came back:\n%s", plain(m.View()))
+	}
+}
+
+// The capture box was the one set of keys the help table did not cover, and it
+// is where the surprises were.
+func TestCaptureKeysAreDocumented(t *testing.T) {
+	_, out := screen(t, "?")
+	text := plain(out)
+	for _, b := range captureBindings {
+		if !strings.Contains(text, b.help) {
+			t.Errorf("%q happens in the capture box but is not in the help", b.label())
+		}
 	}
 }

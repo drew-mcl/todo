@@ -248,18 +248,36 @@ func (m *Model) deleteCurrent() tea.Cmd {
 	return m.reload
 }
 
+// undoLast takes back the last capture -- the tasks come off the list and the
+// words go back in the box. Taking back a filing you did not want and then
+// having to retype it is not taking it back.
 func (m *Model) undoLast() tea.Cmd {
-	if m.lastBatch == 0 {
-		m.say("nothing to undo")
+	if m.lastBatch == 0 && m.held == "" {
+		m.say("nothing to take back")
 		return nil
 	}
-	n, err := m.store.UndoBatch(m.lastBatch)
-	if err != nil {
-		m.failed(err)
+
+	var n int
+	if m.lastBatch != 0 {
+		took, err := m.store.UndoBatch(m.lastBatch)
+		if err != nil {
+			m.failed(err)
+			return nil
+		}
+		n, m.lastBatch = took, 0
+	}
+
+	if m.held != "" {
+		m.draft.SetValue(m.held)
+		m.title.SetValue(m.heldTitle)
+		m.preview = parse.Parse(m.held, m.now())
+		m.held, m.heldTitle = "", ""
+	}
+	if n == 0 {
+		m.say("put back · n to pick it up")
 		return nil
 	}
-	m.lastBatch = 0
-	m.say("undid %d", n)
+	m.say("took back %d · n to pick it up", n)
 	return m.reload
 }
 
@@ -267,26 +285,18 @@ func (m *Model) undoLast() tea.Cmd {
 
 func (m *Model) updateCapture(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
-		// Esc steps back before it steps out. It used to close the whole box
+	case "esc", "ctrl+s":
+		// Esc steps back before it steps out: it used to close the whole box
 		// from the title, which -- with nothing on screen saying the title had
-		// the keys in the first place -- looked like the notes being thrown
-		// away rather than the cursor being somewhere else.
-		if m.onTitle {
+		// the keys -- looked like the notes being thrown away rather than the
+		// cursor being somewhere else.
+		if m.onTitle && msg.String() == "esc" {
 			return m, m.focusDraft()
 		}
-		m.mode = m.cameFrom
-		m.draft.Blur()
-		m.title.Blur()
-		// The draft stays in the box, so reopening picks up where you left off.
-		// Worth saying, because nothing else on the screen shows it survived.
-		if strings.TrimSpace(m.draft.Value()) != "" {
-			m.say("draft kept · n to pick it up")
-		}
-		return m, nil
+		return m, m.fileAndClose()
 
-	case "ctrl+s":
-		return m, m.commit()
+	case "ctrl+x":
+		return m, m.scrap()
 
 	case "tab", "shift+tab":
 		if m.onTitle {
@@ -337,10 +347,20 @@ func (m *Model) focusTitle() tea.Cmd {
 	return m.title.Focus()
 }
 
-func (m *Model) commit() tea.Cmd {
+// fileAndClose is what leaving the capture box does.
+//
+// A box you have finished with is a box whose contents you meant, so the way
+// out does the useful thing rather than asking for a second key that means
+// "and I meant it". The window on the desktop closes the same way.
+func (m *Model) fileAndClose() tea.Cmd {
 	res := parse.Parse(m.draft.Value(), m.now())
 	if len(res.Tasks) == 0 {
-		m.failed(errNothing{})
+		// Nothing to file, and half a thought you have not finished typing is
+		// the thing here worth losing least: it stays in the box.
+		m.closeCapture()
+		if strings.TrimSpace(m.draft.Value()) != "" {
+			m.say("draft kept · n to pick it up")
+		}
 		return nil
 	}
 	batch, err := m.store.CreateBatch(res.Tasks,
@@ -350,23 +370,58 @@ func (m *Model) commit() tea.Cmd {
 		return nil
 	}
 	m.lastBatch = batch
-	m.say("added %d · u to undo", len(res.Tasks))
-	m.draft.SetValue("")
-	m.title.SetValue("")
-	m.preview = nil
-	m.mode = m.cameFrom
-	m.draft.Blur()
+	m.hold()
+	m.say("filed %d · u to take it back", len(res.Tasks))
+	m.clearDraft()
+	m.closeCapture()
 	if m.mode == modeWeek {
 		return m.loadWeek
 	}
 	return m.reload
 }
 
+// scrap throws the draft away. Recoverable, because a box that empties itself
+// on one keystroke had better be.
+func (m *Model) scrap() tea.Cmd {
+	if strings.TrimSpace(m.draft.Value()) == "" {
+		m.closeCapture()
+		return nil
+	}
+	m.hold()
+	m.lastBatch = 0
+	m.say("scrapped · u to put it back")
+	m.clearDraft()
+	m.closeCapture()
+	return nil
+}
+
+// hold remembers what was in the box, so taking a capture back puts the words
+// there as well as taking the tasks off the list.
+func (m *Model) hold() {
+	m.held, m.heldTitle = m.draft.Value(), m.title.Value()
+}
+
+func (m *Model) clearDraft() {
+	m.draft.SetValue("")
+	m.title.SetValue("")
+	m.preview = nil
+}
+
+func (m *Model) closeCapture() {
+	m.mode = m.cameFrom
+	m.onTitle = false
+	m.draft.Blur()
+	m.title.Blur()
+}
+
+// ── edit ────────────────────────────────────────────────────────────────────
+
+// errNothing is an edit that no longer reads as a task. Capture forgives that
+// and keeps the draft; an edit cannot, because there is already a task and it
+// would have nothing left to be.
 type errNothing struct{}
 
 func (errNothing) Error() string { return "no line contained a '|', so nothing became a task" }
-
-// ── edit ────────────────────────────────────────────────────────────────────
 
 // The line is the thing you wrote, so the line is the thing you correct: edit
 // re-opens the shorthand rather than a form of separate fields.

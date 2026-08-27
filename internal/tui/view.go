@@ -215,7 +215,7 @@ func (m *Model) viewCapture() string {
 	// typed after it went in there -- which reads as the box having closed and
 	// the grammar having stopped working.
 	brand, mark := styBrand.Render("capture"), " "
-	hint := "⌃s add · tab name it · esc close"
+	hint := "esc file · ⌃x scrap · tab name it"
 	if m.onTitle {
 		brand, mark = styFaint.Render("capture"), styCursor.Render(bar)
 		hint = "naming the call · tab the notes · esc back"
@@ -439,6 +439,7 @@ func (m *Model) viewHelp() string {
 
 	section("KEYS", listBindings)
 	section("AND TWO-KEY", chordBindings)
+	section("IN CAPTURE", captureBindings)
 	section("ON THE WEEK", weekBindings)
 
 	b.WriteString("\n" + gutter + styHeading.Render("SHORTHAND") + "\n\n")
