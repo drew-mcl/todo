@@ -7,11 +7,13 @@ git clone git@github.com:drew-mcl/todo.git && cd todo
 make && ./todo
 ```
 
-`todo` opens the terminal app. `todo serve --open` opens the web one. Both read
-the same database, so it does not matter which is in front of you.
+`todo` opens the terminal app. `todo serve --open` opens the web one. `make bar`
+adds a macOS capture window on a global hotkey. All three read the same database,
+so it does not matter which is in front of you.
 
 The built client is committed, so a clone needs **Go and nothing else** — no Node,
-no Swift. `make ui` rebuilds the web client if you change it.
+no Swift. `make ui` rebuilds the web client if you change it; `make bar` builds
+the optional capture window.
 
 ## shorthand
 
@@ -101,6 +103,43 @@ day you actually planned.
 `j`/`k` move · `x` complete · `e` edit · `dd` delete · `u` undo
 `g` then `o` `u` `a` `d` to reach the narrower filters
 
+## ⌥Space, from anywhere
+
+```
+make bar-install
+```
+
+A capture window on a system-wide hotkey, so a commitment made on a call can be
+written down without leaving the call. It floats over whatever is in front of
+you — including full-screen apps, and on whatever Space you happen to be on —
+and puts you back where you were when it closes.
+
+It is the same box as the one in the terminal: your shorthand on top, what it
+becomes underneath, re-read on every keystroke. `⌘↵` files it, `esc` puts it
+away, `⌘Z` takes back what you just added.
+
+Clicking away does not close it and does not empty it. Going to fetch the thing
+you were about to paste should not cost you what you have already written.
+
+```
+mac/Sources   the window, the hotkey, the pipe
+mac/Tests     what can be checked without a screen
+```
+
+The window holds no grammar, no dates and no colours of its own. It runs
+`todo bridge` — a line of JSON in, a line of JSON out — so it renders what it is
+told, the same way the web client does. `make test-bar` checks the two agree.
+
+The hotkey is `⌥Space` unless you say otherwise:
+
+```
+defaults write com.drew-mcl.todo.capture hotkey "ctrl+opt+t"
+```
+
+`make bar` builds it without installing; `make bar-uninstall` takes it back off.
+Nothing about it is required — the terminal app and the web one do not know it
+is there.
+
 ## the terminal app
 
 ```
@@ -113,7 +152,9 @@ as it is in the browser, because both sides run the hash in
 server is up.
 
 `n` opens the capture box, and every keystroke re-reads what you have written:
-your shorthand on one line, what it becomes on the next.
+your shorthand on one line, what it becomes on the next. The preview follows the
+line you are on and marks it, so a page-long paste shows you the part you are
+actually looking at.
 
 ```
   2 TASKS · 1 NOTE · 1 SKIPPED
@@ -149,6 +190,11 @@ scheduling is a keystroke instead of a drag — which turns out to be faster:
 `n` capture · `⌃s` add · `j`/`k` move · `x` complete · `e` edit · `dd` delete
 `u` undo · `/` search · `t` today · `w` week · `a` all · `l` logbook · `?` keys
 
+In the capture box, `tab` names the call and `esc` steps back out of the name
+before it closes the box. Which of the two has the keys is drawn, not implied —
+a stray tab used to swallow a whole page of notes into a one-line title.
+Closing keeps the draft.
+
 Search narrows as you type. Completing something holds it on screen, struck
 through, before it folds away — and when the last thing today goes, the day
 says so rather than reading like a day that never had anything on it.
@@ -164,11 +210,17 @@ internal/api         JSON over the top of both
 internal/tui         the terminal app
 internal/ui          the built client, embedded
 ui/                  React + Vite + Tailwind
+mac/                 the optional capture bar (Swift, AppKit)
 ```
 
-There is one parser and it is in Go. The capture preview, the list and the CLI
-all go through it, so they cannot disagree about what a line means — the client
-renders what it is told and derives nothing.
+There is one parser and it is in Go. The capture preview, the list, the CLI and
+the macOS window all go through it, so they cannot disagree about what a line
+means — every client renders what it is told and derives nothing.
+
+Lines arrive with the characters their source gave them, so the parser rewrites
+the look-alikes first: a fullwidth or box-drawing bar copied out of a rendered
+table is read as the separator it plainly is, rather than skipped as a line with
+no separator at all.
 
 Database at `~/.local/share/todo/todo.db`, or set `TODO_DB`.
 
