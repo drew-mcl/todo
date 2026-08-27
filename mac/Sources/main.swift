@@ -15,6 +15,11 @@ final class Bar: NSObject, NSApplicationDelegate {
     private var capture: CaptureController?
     private var status: NSStatusItem?
 
+    /// What is wrong, if anything. A hotkey that could not be claimed is
+    /// otherwise perfectly silent: you press it, nothing happens, and nothing
+    /// anywhere says why.
+    private var trouble: String?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         buildMenu()
@@ -46,8 +51,13 @@ final class Bar: NSObject, NSApplicationDelegate {
 
         let spec = UserDefaults.standard.string(forKey: "hotkey") ?? defaultHotkey
         Hotkey.shared.onFire = { [weak self] in self?.capture?.toggle() }
-        if !Hotkey.shared.register(spec) && !Hotkey.shared.register(defaultHotkey) {
-            note("that shortcut is taken; open the window from the menu bar")
+        if !Hotkey.shared.register(spec) {
+            trouble = "\(spec) is taken or unreadable"
+            if spec != defaultHotkey && Hotkey.shared.register(defaultHotkey) {
+                trouble = "\(spec) is taken — using \(defaultHotkey) instead"
+            } else if Hotkey.shared.label.isEmpty {
+                trouble = "\(spec) is taken by something else"
+            }
         }
         refreshMenu()
     }
@@ -76,6 +86,11 @@ final class Bar: NSObject, NSApplicationDelegate {
 
     private func refreshMenu() {
         let menu = NSMenu()
+        if let trouble {
+            let said = menu.addItem(withTitle: trouble, action: nil, keyEquivalent: "")
+            said.isEnabled = false
+            menu.addItem(.separator())
+        }
         let shortcut = Hotkey.shared.label.isEmpty ? "" : "  " + Hotkey.shared.label
         menu.addItem(withTitle: "Capture" + shortcut, action: #selector(openCapture), keyEquivalent: "")
         menu.addItem(withTitle: "Open todo in a browser", action: #selector(openWeb), keyEquivalent: "")
@@ -128,8 +143,10 @@ final class Bar: NSObject, NSApplicationDelegate {
     // ── saying something went wrong ─────────────────────────────────────────
 
     private func note(_ message: String) {
+        trouble = message
         status?.button?.toolTip = message
         NSLog("todo capture: %@", message)
+        refreshMenu()
     }
 
     private func complain(_ title: String, _ body: String) {

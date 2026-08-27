@@ -25,8 +25,8 @@ final class Hotkey {
     @discardableResult
     func register(_ spec: String) -> Bool {
         unregister()
+        label = ""
         guard let combo = Combination(spec) else { return false }
-        label = combo.label
 
         if handler == nil {
             var kind = EventTypeSpec(
@@ -41,7 +41,11 @@ final class Hotkey {
         let id = EventHotKeyID(signature: OSType(0x544F444F), id: 1) // 'TODO'
         let status = RegisterEventHotKey(
             combo.key, combo.modifiers, id, GetApplicationEventTarget(), 0, &ref)
-        return status == noErr
+        guard status == noErr else { return false }
+        // Named only once it is really ours, so the menu cannot offer a
+        // shortcut that belongs to something else.
+        label = combo.label
+        return true
     }
 
     func unregister() {
