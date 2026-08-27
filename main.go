@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ Usage:
   todo                                   the terminal app
   todo serve [--port 8765] [--open]      the web app
   todo add   [text...]                   capture from the terminal or stdin
+  todo bridge                            answer the capture bar over stdin
 
 Shorthand:
   topic | task text [| due] [@who] [!priority] [#tags] [> note]
@@ -59,6 +61,8 @@ func run(args []string) error {
 		return serve(args[1:])
 	case "add":
 		return add(args[1:])
+	case "bridge":
+		return bridge(args[1:])
 	case "-h", "--help", "help":
 		fmt.Printf(usage, store.DefaultPath())
 		return nil
@@ -132,6 +136,26 @@ func launch(url string) {
 	_ = exec.Command(cmd, url).Start()
 }
 
+// bridge answers the macOS capture bar over a pipe. It is not meant to be run
+// by hand: see mac/ for what holds the other end.
+func bridge(args []string) error {
+	fs := flag.NewFlagSet("bridge", flag.ExitOnError)
+	dbPath := fs.String("db", store.DefaultPath(), "database file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	st, err := store.Open(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	out := bufio.NewWriter(os.Stdout)
+	defer out.Flush()
+	return api.Bridge(st, time.Now, os.Stdin, out)
+}
+
 func add(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	dbPath := fs.String("db", store.DefaultPath(), "database file")
@@ -155,6 +179,12 @@ func add(args []string) error {
 	now := time.Now()
 	res := parse.Parse(text, now)
 	if len(res.Tasks) == 0 {
+		// An unquoted line is the likeliest reason: the shell took the '|' for
+		// itself and this only ever saw the half in front of it.
+		if len(fs.Args()) > 0 && !strings.Contains(text, "|") {
+			return fmt.Errorf(
+				"no '|' reached this program -- quote the whole line:\n  todo add %q", text+" | ...")
+		}
 		return fmt.Errorf("no line contained a '|', so nothing was read as a task")
 	}
 

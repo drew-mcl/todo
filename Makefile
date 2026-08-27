@@ -5,7 +5,10 @@
 # Node is only needed to *change* the client; Swift only for the optional
 # macOS capture bar.
 
-.PHONY: all build ui test test-go test-ui dev clean install
+APP    = mac/build/todo capture.app
+BAR_ID = com.drew-mcl.todo.capture
+
+.PHONY: all build ui bar bar-install bar-uninstall test test-go test-ui test-bar dev clean install
 
 all: build
 
@@ -22,6 +25,38 @@ ui:
 install: build
 	go install .
 
+## bar: build the optional macOS capture bar (needs the Swift toolchain)
+bar: build
+	@mkdir -p "$(APP)/Contents/MacOS"
+	@cp mac/Info.plist "$(APP)/Contents/Info.plist"
+	swiftc -O -swift-version 5 \
+		-target $$(uname -m)-apple-macos13 \
+		-sdk $$(xcrun --show-sdk-path) \
+		-framework AppKit -framework Carbon \
+		-o "$(APP)/Contents/MacOS/todo-capture" mac/Sources/*.swift
+	@cp todo mac/build/todo
+	@touch "$(APP)"
+	@echo "built $(APP) -- open it, then press ⌥Space"
+
+## bar-install: put the bar in ~/Applications and start it at login
+bar-install: bar install
+	@mkdir -p "$$HOME/Applications"
+	@rm -rf "$$HOME/Applications/todo capture.app"
+	@cp -R "$(APP)" "$$HOME/Applications/"
+	@mkdir -p "$$HOME/Library/LaunchAgents"
+	@sed "s|__APP__|$$HOME/Applications/todo capture.app|" mac/LaunchAgent.plist \
+		> "$$HOME/Library/LaunchAgents/$(BAR_ID).plist"
+	@launchctl unload "$$HOME/Library/LaunchAgents/$(BAR_ID).plist" 2>/dev/null || true
+	@launchctl load "$$HOME/Library/LaunchAgents/$(BAR_ID).plist"
+	@echo "the capture bar is in the menu bar and starts at login -- ⌥Space opens it"
+
+## bar-uninstall: stop it and take it back off
+bar-uninstall:
+	@launchctl unload "$$HOME/Library/LaunchAgents/$(BAR_ID).plist" 2>/dev/null || true
+	@rm -f "$$HOME/Library/LaunchAgents/$(BAR_ID).plist"
+	@rm -rf "$$HOME/Applications/todo capture.app"
+	@echo "removed"
+
 ## test: everything
 test: test-go test-ui
 
@@ -33,6 +68,18 @@ test-go:
 test-ui:
 	cd ui && npm test && npx tsc --noEmit
 
+## test-bar: the parts of the capture bar that do not need a screen (needs Swift)
+test-bar: build
+	@mkdir -p mac/build
+	swiftc -swift-version 5 \
+		-target $$(uname -m)-apple-macos13 \
+		-sdk $$(xcrun --show-sdk-path) \
+		-framework AppKit -framework Carbon \
+		-o mac/build/bar-test \
+		mac/Sources/Bridge.swift mac/Sources/Theme.swift mac/Sources/Render.swift \
+		mac/Tests/main.swift
+	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db mac/build/bar-test
+
 ## dev: API on 8765, Vite on 5173 proxying to it
 dev:
 	@echo "two shells:"
@@ -41,4 +88,4 @@ dev:
 
 clean:
 	rm -f todo
-	rm -rf ui/node_modules
+	rm -rf ui/node_modules mac/build

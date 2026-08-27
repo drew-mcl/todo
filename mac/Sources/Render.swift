@@ -1,0 +1,181 @@
+import AppKit
+
+// Drawing the parse, kept apart from the window that shows it.
+//
+// Two things here are worth being sure of and neither needs a screen: the spans
+// that colour the draft have to line up with the characters actually in it, and
+// the preview has to mark the line the caret is on. Both are pure functions of
+// what came back down the bridge, so mac/Tests exercises them directly.
+
+enum Render {
+    /// Where each highlighted span falls in text.
+    ///
+    /// The parser rewrites a look-alike bar into a real one, so a line's spans
+    /// only line up when nothing needed rewriting. A line that does not fit is
+    /// left out rather than mispainted -- plain ink is a smaller lie than the
+    /// wrong colours in the wrong places.
+    static func spans(for text: String, lines: [PreviewLine]) -> [(NSRange, String)] {
+        let ns = text as NSString
+        var starts: [Int] = [0]
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length),
+                               options: [.byLines, .substringNotRequired]) { _, _, enclosing, _ in
+            starts.append(enclosing.location + enclosing.length)
+        }
+
+        var out: [(NSRange, String)] = []
+        for line in lines {
+            guard let tokens = line.tokens, line.n >= 1, line.n - 1 < starts.count else { continue }
+            let start = starts[line.n - 1]
+            let width = tokens.reduce(0) { $0 + ($1.text as NSString).length }
+            guard start + width <= ns.length else { continue }
+
+            var at = start
+            for token in tokens {
+                let length = (token.text as NSString).length
+                if length > 0 {
+                    out.append((NSRange(location: at, length: length), token.kind))
+                }
+                at += length
+            }
+        }
+        return out
+    }
+
+    /// The preview, and the range of the row the caret's line produced -- which
+    /// is what the window scrolls to, so the preview follows the draft instead
+    /// of sitting at the top of a page you typed several minutes ago.
+    static func preview(_ preview: Preview?, hues: [String: Int], caret: Int)
+        -> (NSAttributedString, NSRange?) {
+        guard let preview, !preview.lines.isEmpty else {
+            return (quiet("your lines appear here as they will be filed", "ink4"), nil)
+        }
+
+        let out = NSMutableAttributedString()
+        var marked: NSRange?
+
+        for line in preview.lines {
+            let start = out.length
+            let live = line.n == caret
+            out.append(mark(live))
+
+            switch line.kind {
+            case "task":
+                if let task = line.task { out.append(row(task, hue: hues[task.topic])) }
+            case "note":
+                let owner = line.ownerTitle.map { " to “\($0)”" } ?? ""
+                out.append(quiet("↳ attached" + owner, "ink3"))
+            default:
+                out.append(struck(line.raw))
+                out.append(quiet("   " + (line.reason ?? "skipped"), "ink4"))
+            }
+
+            if let warning = line.task?.warning, !warning.isEmpty {
+                out.append(NSAttributedString(string: "\n"))
+                out.append(mark(live))
+                out.append(NSAttributedString(string: "  " + warning, attributes: [
+                    .font: Type.mono, .foregroundColor: Theme.shared.colour("danger"),
+                ]))
+            }
+            out.append(NSAttributedString(string: "\n"))
+            if live { marked = NSRange(location: start, length: out.length - start) }
+        }
+        return (out, marked)
+    }
+
+    /// What the draft currently amounts to, in the same words the terminal uses.
+    static func summary(_ preview: Preview?) -> String {
+        guard let preview else { return "NOTHING YET" }
+        var parts: [String] = []
+        if preview.tasks > 0 { parts.append("\(preview.tasks) TASK\(preview.tasks == 1 ? "" : "S")") }
+        if preview.notes > 0 { parts.append("\(preview.notes) NOTE\(preview.notes == 1 ? "" : "S")") }
+        if preview.skipped > 0 { parts.append("\(preview.skipped) SKIPPED") }
+        return parts.isEmpty ? "NOTHING YET" : parts.joined(separator: " · ")
+    }
+
+    /// The grammar, in the colours it will be read in.
+    static func grammar() -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let spelling: [(String, String)] = [
+            ("topic", "topic"), (" | ", "pipe"), ("what needs doing", "text"),
+            (" | ", "pipe"), ("today", "due"), (" ", "text"), ("@who", "who"),
+            (" ", "text"), ("!!", "pri"), (" ", "text"), ("#tag", "tag"),
+            ("  > note", "note"),
+        ]
+        for (text, kind) in spelling {
+            out.append(NSAttributedString(string: text, attributes: [
+                .font: Type.mono, .foregroundColor: Theme.shared.token(kind),
+            ]))
+        }
+        return out
+    }
+
+    // ── one row ─────────────────────────────────────────────────────────────
+
+    /// A parsed task: what it will be called, then the quiet detail.
+    private static func row(_ task: PreviewTask, hue: Int?) -> NSAttributedString {
+        let out = NSMutableAttributedString(string: task.title, attributes: [
+            .font: Type.title, .foregroundColor: Theme.shared.colour("ink"),
+        ])
+
+        var parts: [NSAttributedString] = []
+        let dot = NSMutableAttributedString(string: "● ", attributes: [
+            .font: Type.mono, .foregroundColor: Theme.shared.topicColour(hue),
+        ])
+        dot.append(quiet(task.topic, "ink3"))
+        parts.append(dot)
+
+        if !task.dueLabel.isEmpty {
+            parts.append(NSAttributedString(string: task.dueLabel.lowercased(), attributes: [
+                .font: Type.mono, .foregroundColor: Theme.shared.colour("accent"),
+            ]))
+        }
+        if !task.assignee.isEmpty { parts.append(quiet(task.assignee, "ink3")) }
+        if task.priority > 0 {
+            parts.append(NSAttributedString(
+                string: String(repeating: "!", count: task.priority),
+                attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("danger")]))
+        }
+        for tag in task.tags { parts.append(quiet("#" + tag, "ink3")) }
+
+        out.append(quiet("   ", "ink3"))
+        for (i, part) in parts.enumerated() {
+            if i > 0 { out.append(quiet(" · ", "ink4")) }
+            out.append(part)
+        }
+        if !task.note.isEmpty {
+            out.append(NSAttributedString(string: "\n     "))
+            out.append(quiet(task.note.replacingOccurrences(of: "\n", with: " "), "ink3"))
+        }
+        return out
+    }
+
+    /// A section label: the small, spaced capitals the other two front ends use.
+    static func heading(_ s: String) -> NSAttributedString {
+        NSAttributedString(string: s, attributes: [
+            .font: Type.heading, .foregroundColor: Theme.shared.colour("ink4"), .kern: 0.8,
+        ])
+    }
+
+    /// The bar down the side of the line being typed: the same mark the list
+    /// cursor uses in the terminal.
+    static func mark(_ on: Bool) -> NSAttributedString {
+        NSAttributedString(string: on ? "▌ " : "  ", attributes: [
+            .font: Type.mono, .foregroundColor: Theme.shared.colour("accent"),
+        ])
+    }
+
+    private static func quiet(_ s: String, _ colour: String) -> NSAttributedString {
+        NSAttributedString(string: s, attributes: [
+            .font: Type.mono, .foregroundColor: Theme.shared.colour(colour),
+        ])
+    }
+
+    private static func struck(_ s: String) -> NSAttributedString {
+        NSAttributedString(string: s, attributes: [
+            .font: Type.mono,
+            .foregroundColor: Theme.shared.colour("ink4"),
+            .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+            .strikethroughColor: Theme.shared.colour("line"),
+        ])
+    }
+}
