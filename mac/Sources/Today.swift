@@ -211,6 +211,8 @@ final class TodayController: NSObject, NSWindowDelegate {
 }
 
 extension Notification.Name {
-    /// Raised when the day window hands over to the capture box.
+    /// The two windows hand over to each other rather than each knowing how to
+    /// build the other.
     static let todoCapture = Notification.Name("todo.capture")
+    static let todoToday = Notification.Name("todo.today")
 }

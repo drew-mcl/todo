@@ -183,6 +183,9 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
             reverse()
         case .leaveTitle:
             panel.makeFirstResponder(draft)
+        case .today:
+            hide()
+            NotificationCenter.default.post(name: .todoToday, object: nil)
         case .pass:
             return false
         }
@@ -546,7 +549,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         // window is drawn from. ⌘↵ still files: the key monitor has it.
         addButton.onClick = { [weak self] in self?.fileAndClose() }
 
-        let keys = NSTextField(labelWithString: "esc file · ⌘⌫ scrap · ⌘/ keys")
+        let keys = NSTextField(
+            labelWithString: "esc file · ⌘⌫ scrap · ⌘T today · ⌘/ keys")
         keys.font = Type.mono
         keys.textColor = Theme.shared.colour("ink4")
 

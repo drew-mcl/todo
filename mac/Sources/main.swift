@@ -23,13 +23,26 @@ enum Shortcut: UInt32 {
         }
     }
 
-    /// The web one has no default: a global key that steals ⌥W from every text
-    /// field on the machine is not worth a browser tab.
+    /// One key by default, not three.
+    ///
+    /// A global shortcut is taken from every application on the machine, and
+    /// three of them for one small app is more of the keyboard than it has any
+    /// business owning. The other two windows are one keystroke away once you
+    /// are in -- ⌘T from the box, n back from the day -- and anyone who would
+    /// rather spend the keys can name them.
     var fallback: String? {
         switch self {
         case .capture: return "opt space"
-        case .today: return "ctrl+opt+space"
-        case .web: return nil
+        case .today, .web: return nil
+        }
+    }
+
+    /// How to reach it without a shortcut of its own.
+    var otherwise: String {
+        switch self {
+        case .capture: return "n from the day"
+        case .today: return "⌘T from the box"
+        case .web: return ""
         }
     }
 
@@ -92,6 +105,9 @@ final class Bar: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             forName: .todoCapture, object: nil, queue: .main
         ) { [weak self] _ in self?.capture?.show() }
+        NotificationCenter.default.addObserver(
+            forName: .todoToday, object: nil, queue: .main
+        ) { [weak self] _ in self?.today?.show() }
 
         claim(.capture) { [weak self] in self?.capture?.toggle() }
         claim(.today) { [weak self] in self?.today?.toggle() }
@@ -147,8 +163,9 @@ final class Bar: NSObject, NSApplicationDelegate {
         ]
         for (which, action) in doors {
             let shortcut = Hotkey.shared.label(which.rawValue)
+            let how = shortcut.isEmpty ? which.otherwise : shortcut
             let item = menu.addItem(
-                withTitle: which.name + (shortcut.isEmpty ? "" : "  " + shortcut),
+                withTitle: which.name + (how.isEmpty ? "" : "  " + how),
                 action: action, keyEquivalent: "")
             item.target = self
         }

@@ -149,6 +149,8 @@ bridge.send("hello") { reply in
         check("⌘Z is the text view's own with nothing to take back",
               press(Keys.z, command: true, canTakeBack: false) == .pass)
         check("a plain ↵ is a new line, not a filing", press(Keys.enter) == .pass)
+        check("⌘T hands over to the day", press(Keys.t, command: true) == .today)
+        check("a bare t does not", press(Keys.t) == .pass)
 
         // ── normal mode ─────────────────────────────────────────────────
         //

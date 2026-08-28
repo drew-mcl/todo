@@ -17,6 +17,8 @@ enum Press: Equatable {
     case reverse
     /// Out of the name of the call before out of the window.
     case leaveTitle
+    /// Hand over to the day, which is the other window this app is.
+    case today
     /// Not ours; let the text view have it.
     case pass
 }
@@ -26,6 +28,7 @@ enum Keys {
     static let enter: UInt16 = 36
     static let backspace: UInt16 = 51
     static let z: UInt16 = 6
+    static let t: UInt16 = 17
 
     static func press(code: UInt16, command: Bool, inTitle: Bool, canTakeBack: Bool) -> Press {
         switch (code, command) {
@@ -36,6 +39,8 @@ enum Keys {
             return .file
         case (backspace, true):
             return .scrap
+        case (t, true):
+            return .today
         case (z, true):
             return canTakeBack ? .reverse : .pass
         default:

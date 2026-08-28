@@ -142,12 +142,14 @@ The hotkey is `⌥Space` unless you say otherwise:
 defaults write com.drew-mcl.todo.capture hotkey "ctrl+opt+t"
 ```
 
-`⌃⌥Space` shows the day instead: what is due, what has slipped, `j`/`k` to move
-and `x` to close one out. It holds no list of its own — the same database the
-other two front ends read, so ticking something here is ticked everywhere by the
-time the window has closed. `n` hands over to the capture box.
+`⌘T` from there shows the day instead: what is due, what has slipped, `j`/`k` to
+move and `x` to close one out. `n` comes back. It holds no list of its own — the
+same database the other two front ends read, so ticking something here is ticked
+everywhere by the time the window has closed.
 
-The browser is a menu item away, or give it a key of its own:
+One global key, not three. A shortcut is taken from every application on the
+machine and this is a small app; the other windows are one keystroke away once
+you are in, and the menu bar has all three. If you would rather spend the keys:
 
 ```
 defaults write com.drew-mcl.todo.capture hotkeyToday "ctrl+opt+t"
