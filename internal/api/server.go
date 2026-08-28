@@ -48,6 +48,7 @@ func (s *Server) routes(client http.Handler) {
 	s.mux.HandleFunc("GET /api/export", s.handleExportAll)
 	s.mux.HandleFunc("GET /api/keys", s.handleKeys)
 	s.mux.HandleFunc("POST /api/sessions/{id}/rename", s.handleRenameSession)
+	s.mux.HandleFunc("POST /api/sessions/{id}/merge", s.handleMergeSessions)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExport)
 	s.mux.HandleFunc("POST /api/capture", s.handleCapture)
 	s.mux.HandleFunc("POST /api/batches/{id}/undo", s.handleUndo)

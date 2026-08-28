@@ -235,3 +235,42 @@ func TestBridgeAnswersEveryRequest(t *testing.T) {
 		t.Error("an unknown op was answered as though it worked")
 	}
 }
+
+// Calls read as a list like the others, but a capture is not a task: it opens
+// rather than closes, and one of them opens to what it holds.
+func TestBridgeServesTheCalls(t *testing.T) {
+	replies := talk(t,
+		BridgeRequest{ID: 1, Op: "capture", Draft: "prod issue | chase the vendor | today",
+			Title: "Platform sync"},
+		BridgeRequest{ID: 2, Op: "capture", Draft: "admin | pull the numbers | today"},
+		BridgeRequest{ID: 3, Op: "list", View: "calls"},
+	)
+	calls := replies[2].Day
+	if calls == nil {
+		t.Fatalf("no calls came back: %s", replies[2].Error)
+	}
+	if len(calls.Sections) != 2 {
+		t.Fatalf("%d calls, want 2", len(calls.Sections))
+	}
+	named := calls.Sections[1].Tasks[0]
+	if named.Title != "Platform sync" {
+		t.Errorf("the first capture is called %q", named.Title)
+	}
+	if named.Assignee != "1 of 1 open" {
+		t.Errorf("a call should say how much of it is owed, got %q", named.Assignee)
+	}
+
+	// Opening one shows what it holds, and nothing else.
+	opened := talk(t,
+		BridgeRequest{ID: 1, Op: "capture", Draft: "prod issue | chase the vendor | today",
+			Title: "Platform sync"},
+		BridgeRequest{ID: 2, Op: "capture", Draft: "admin | pull the numbers | today"},
+		BridgeRequest{ID: 3, Op: "list", View: "call", Batch: 1},
+	)[2].Day
+	if opened == nil || opened.Label != "Platform sync" {
+		t.Fatalf("opened %v", opened)
+	}
+	if n := len(opened.Sections[0].Tasks); n != 1 {
+		t.Errorf("the capture holds %d tasks, want 1", n)
+	}
+}

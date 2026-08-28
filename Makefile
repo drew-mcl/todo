@@ -74,7 +74,7 @@ test-go:
 
 ## test-ui: needs Node
 test-ui:
-	cd ui && npm test && npx tsc --noEmit
+	cd ui && npm test && npm run build
 
 SWIFT = swiftc -swift-version 5 -target $(shell uname -m)-apple-macos13 \
 	-sdk $(shell xcrun --show-sdk-path) -framework AppKit -framework Carbon

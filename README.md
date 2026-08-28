@@ -61,6 +61,11 @@ Name a capture and it becomes a call you can find again. `calls` lists them
 newest first with how much is still open, so a commitment can be traced back to
 the conversation it was made in.
 
+Filing twice for the same call is easy to do — someone says one more thing after
+you thought you were finished. Tick the pieces and **merge** folds them into one:
+the oldest is kept, the rest move into it, and a capture with no name of its own
+takes one from what it swallowed.
+
 **share** renders a call as plain text for a chat message — grouped by who owes
 what, so each person can find their own name:
 
@@ -119,7 +124,10 @@ becomes underneath, re-read on every keystroke.
 
 Closing is filing. A capture box you have finished with is a capture box whose
 contents you meant, so `esc` stops typing and `esc` again files what you wrote
-and puts you back — as does `↵`, once you have stopped typing. Throwing it away is the keystroke you have to mean: `⌘⌫`. Either way `⌘Z`
+and puts you back — as does `↵`, once you have stopped typing.
+
+A panel cannot be minimised, so `⌘H` is the nearest thing: the window goes away
+and everything in it stays exactly as it was, unfiled. `⌥Space` brings it back. Throwing it away is the keystroke you have to mean: `⌘⌫`. Either way `⌘Z`
 puts it back, tasks off the list and words back in the box, so nothing here
 costs more than one keystroke to undo. A draft with nothing fileable in it is
 kept rather than filed or lost.
@@ -146,9 +154,11 @@ defaults write com.drew-mcl.todo.capture hotkey "ctrl+opt+t"
 they are the terminal app's lists:
 
 ```
-t today · w week · a all · l logbook · n new
+t today · w week · a all · l logbook · c calls · n new
 j/k move · x done · esc close
 ```
+
+A call opens rather than closes — `↵` on one shows what was filed in it.
 
 They are single letters there and cannot be in the box, where `w` is a word
 forward and `a` starts typing. So the box is for writing and the lists are for

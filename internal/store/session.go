@@ -85,3 +85,83 @@ func (s *Store) RenameSession(id int64, title string) error {
 	}
 	return nil
 }
+
+// Merge folds other captures into one.
+//
+// Filing twice for the same call is easy to do -- someone says one more thing
+// after you thought you were finished -- and leaves the record in two pieces.
+// This puts it back together: the tasks move, the emptied captures go, and the
+// one you kept takes a name if it did not have one.
+//
+// Returns how many tasks moved.
+func (s *Store) Merge(into int64, others []int64) (int, error) {
+	keep := make([]int64, 0, len(others))
+	for _, id := range others {
+		if id != into {
+			keep = append(keep, id)
+		}
+	}
+	if len(keep) == 0 {
+		return 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// The one being kept has to exist, or this would orphan everything into a
+	// batch id that is not there.
+	var exists int
+	if err := tx.QueryRow(`SELECT count(*) FROM batches WHERE id = ?`, into).Scan(&exists); err != nil {
+		return 0, fmt.Errorf("looking up the capture: %w", err)
+	}
+	if exists == 0 {
+		return 0, ErrNotFound
+	}
+
+	marks, args := placeholders(keep)
+
+	// A capture with no name of its own takes the first one it can find among
+	// the others, rather than staying "the 3.15 on Tuesday" for no reason.
+	var title string
+	if err := tx.QueryRow(`SELECT title FROM batches WHERE id = ?`, into).Scan(&title); err != nil {
+		return 0, err
+	}
+	if title == "" {
+		var found sql.NullString
+		if err := tx.QueryRow(`SELECT title FROM batches
+			WHERE id IN (`+marks+`) AND title <> '' ORDER BY id LIMIT 1`, args...).Scan(&found); err != nil &&
+			err != sql.ErrNoRows {
+			return 0, err
+		}
+		if found.Valid && found.String != "" {
+			if _, err := tx.Exec(`UPDATE batches SET title = ? WHERE id = ?`, found.String, into); err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	res, err := tx.Exec(`UPDATE tasks SET batch_id = ? WHERE batch_id IN (`+marks+`)`,
+		append([]any{into}, args...)...)
+	if err != nil {
+		return 0, fmt.Errorf("moving the tasks: %w", err)
+	}
+	moved, _ := res.RowsAffected()
+
+	if _, err := tx.Exec(`DELETE FROM batches WHERE id IN (`+marks+`)`, args...); err != nil {
+		return 0, fmt.Errorf("removing the emptied captures: %w", err)
+	}
+	return int(moved), tx.Commit()
+}
+
+// placeholders builds "?, ?, ?" and the arguments to go with it.
+func placeholders(ids []int64) (string, []any) {
+	marks := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		marks[i], args[i] = "?", id
+	}
+	return strings.Join(marks, ", "), args
+}

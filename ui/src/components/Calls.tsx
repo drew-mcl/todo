@@ -19,12 +19,35 @@ export function Calls({
   const [exporting, setExporting] = useState<Session>();
   const [editing, setEditing] = useState<number>();
   const [draftTitle, setDraftTitle] = useState("");
+  // Filing twice for the same call is easy to do -- someone says one more thing
+  // after you thought you were finished. Picking the pieces puts them back.
+  const [picked, setPicked] = useState<number[]>([]);
+  const [problem, setProblem] = useState<string>();
 
   const { data } = useQuery({ queryKey: ["sessions"], queryFn: api.sessions });
   const rename = useMutation({
     mutationFn: ({ id, title }: { id: number; title: string }) => api.renameSession(id, title),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
   });
+
+  /** The oldest of the picked ones is kept: it is where the call started. */
+  const merge = useMutation({
+    mutationFn: () => {
+      const order = (data ?? []).filter((s) => picked.includes(s.id)).map((s) => s.id);
+      const into = order[order.length - 1];
+      return api.mergeSessions(into, order.slice(0, -1));
+    },
+    onSuccess: () => {
+      setPicked([]);
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ["list"] });
+    },
+    onError: (e: unknown) =>
+      setProblem(e instanceof Error ? e.message : "Those would not merge."),
+  });
+
+  const pick = (id: number) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   if (data && data.length === 0) {
     return (
@@ -43,8 +66,23 @@ export function Calls({
         {data?.map((s) => (
           <li
             key={s.id}
-            className="group/row flex items-start gap-3 border-b border-line-soft py-3"
+            className={clsx(
+              "group/row flex items-start gap-3 border-b border-line-soft py-3",
+              picked.includes(s.id) && "bg-accent/8",
+            )}
           >
+            <input
+              type="checkbox"
+              checked={picked.includes(s.id)}
+              onChange={() => pick(s.id)}
+              aria-label={`Pick ${s.title} to merge`}
+              className={clsx(
+                "mt-1 shrink-0 accent-accent transition-opacity",
+                picked.length > 0
+                  ? "opacity-100"
+                  : "opacity-0 group-hover/row:opacity-100 focus:opacity-100",
+              )}
+            />
             <div className="min-w-0 flex-1">
               {editing === s.id ? (
                 <input
@@ -118,6 +156,36 @@ export function Calls({
           </li>
         ))}
       </ul>
+
+      {picked.length > 0 && (
+        <div className="sticky bottom-4 mt-4 flex max-w-[900px] flex-wrap items-center gap-3 rounded-md border border-line bg-raised px-4 py-3 shadow-[var(--shadow-pop)]">
+          <span className="font-mono text-base text-ink-2">
+            {picked.length} picked
+          </span>
+          <span className="font-mono text-xs text-ink-4">
+            merging keeps the oldest and folds the rest into it
+          </span>
+          {problem && <span className="font-mono text-xs text-danger">{problem}</span>}
+          <div className="ml-auto flex gap-2">
+            <button
+              onClick={() => {
+                setPicked([]);
+                setProblem(undefined);
+              }}
+              className="rounded-md border border-line px-3 py-1.5 text-base text-ink-3 hover:border-ink-4 hover:text-ink"
+            >
+              cancel
+            </button>
+            <button
+              onClick={() => merge.mutate()}
+              disabled={picked.length < 2 || merge.isPending}
+              className="rounded-md bg-ink px-3.5 py-1.5 text-base font-medium text-bg transition-opacity hover:opacity-85 disabled:opacity-35"
+            >
+              merge {picked.length}
+            </button>
+          </div>
+        </div>
+      )}
 
       <ExportDialog session={exporting} onClose={() => setExporting(undefined)} />
     </>

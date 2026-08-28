@@ -25,6 +25,7 @@ final class ListController: NSObject, NSWindowDelegate {
 
     private var day: Day?
     private var view = "today"
+    private var batch = 0
     private var cursor = 0
     private var monitor: Any?
 
@@ -42,6 +43,7 @@ final class ListController: NSObject, NSWindowDelegate {
     func show(_ which: String = "today") {
         if which != view {
             view = which
+            batch = 0
             cursor = 0
             day = nil
         }
@@ -95,6 +97,11 @@ final class ListController: NSObject, NSWindowDelegate {
 
     /// The terminal app's keys, because these are the terminal app's lists.
     private func handle(_ event: NSEvent) -> Bool {
+        if panel.isKeyWindow, event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers == "h" {
+            hide()
+            return true
+        }
         guard panel.isKeyWindow, !event.modifierFlags.contains(.command) else { return false }
         let all = every()
 
@@ -115,13 +122,17 @@ final class ListController: NSObject, NSWindowDelegate {
             draw()
         case "x", " ", "\r":
             guard cursor < all.count else { return true }
-            close(all[cursor])
+            // A row in the list of calls is a capture, not a task: it opens
+            // rather than closes, and toggling it would tick whatever task
+            // happened to share its number.
+            if view == "calls" { open(all[cursor]) } else { close(all[cursor]) }
 
         // The other lists, one letter each.
         case "t": show("today")
         case "w": show("week")
         case "a": show("all")
         case "l": show("logbook")
+        case "c": show("calls")
 
         case "n":
             // Back into the box, which is the other half of this.
@@ -137,8 +148,18 @@ final class ListController: NSObject, NSWindowDelegate {
 
     private func every() -> [Task] { (day?.sections ?? []).flatMap(\.tasks) }
 
+    /// Open one capture, which is the only thing a row in the list of calls can
+    /// usefully do.
+    private func open(_ call: Task) {
+        batch = call.id
+        view = "call"
+        cursor = 0
+        day = nil
+        reload()
+    }
+
     private func reload() {
-        bridge.send("list", view: view) { [weak self] reply in
+        bridge.send("list", batch: batch, view: view) { [weak self] reply in
             guard let self else { return }
             guard let day = reply.day else {
                 self.heading.stringValue = reply.error ?? "todo bridge did not answer"
@@ -153,7 +174,7 @@ final class ListController: NSObject, NSWindowDelegate {
     /// Closing one out. The reply carries the day back, so the list redraws
     /// from what is actually stored rather than from a guess.
     private func close(_ task: Task) {
-        bridge.send("toggle", task: task.id, view: view) { [weak self] reply in
+        bridge.send("toggle", batch: batch, task: task.id, view: view) { [weak self] reply in
             guard let self else { return }
             guard let day = reply.day else { return }
             self.day = day
@@ -178,11 +199,15 @@ final class ListController: NSObject, NSWindowDelegate {
                     : "\(day.done) OF \(day.open + day.done) DONE")
                 : (day.truncated == true
                     ? "\(total) OF \(day.total ?? total)"
-                    : (total == 1 ? "1 TASK" : "\(total) TASKS")))
+                    : plural(total, day.view == "calls" ? "CALL" : "TASK")))
 
         let (text, marked) = Render.day(day, cursor: cursor)
         list.textStorage?.setAttributedString(text)
         if let marked { list.scrollRangeToVisible(marked) }
+    }
+
+    private func plural(_ n: Int, _ one: String) -> String {
+        n == 1 ? "1 \(one)" : "\(n) \(one)S"
     }
 
     // ── layout ──────────────────────────────────────────────────────────────
@@ -200,7 +225,7 @@ final class ListController: NSObject, NSWindowDelegate {
         footRule.boxType = .separator
 
         keys.attributedStringValue = NSAttributedString(
-            string: "t today · w week · a all · l logbook · n new · x done · esc close",
+            string: "t today · w week · a all · l logbook · c calls · n new · esc close",
             attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("ink4")])
 
         let views: [NSView] = [heading, meter, headRule, scroll, footRule, keys]

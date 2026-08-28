@@ -192,6 +192,11 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
             reverse()
         case .leaveTitle:
             panel.makeFirstResponder(draft)
+        case .away:
+            // There is no minimising a panel, so this is the nearest thing:
+            // everything stays exactly where it is and the window does not.
+            conceal()
+            Interrupted.restore()
         case .today:
             // Out of the box and into the lists, where t w a l are one letter
             // each -- here they are word-forward and append.
@@ -584,7 +589,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         addButton.onClick = { [weak self] in self?.fileAndClose() }
 
         let keys = NSTextField(
-            labelWithString: "esc file · ⌘⌫ scrap · ⌘T lists · ⌘/ keys")
+            labelWithString: "esc file · ⌘H away · ⌘⌫ scrap · ⌘T lists · ⌘/ keys")
         keys.font = Type.mono
         keys.textColor = Theme.shared.colour("ink4")
 

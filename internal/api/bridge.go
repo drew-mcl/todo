@@ -184,7 +184,7 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 		}
 
 	case "list":
-		day, err := list(st, now(), req.View)
+		day, err := list(st, now(), req.View, req.Batch)
 		if err != nil {
 			return fail("reading the list: %v", err)
 		}
@@ -194,7 +194,7 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 		if _, err := st.Toggle(req.Task, now()); err != nil {
 			return fail("closing that one: %v", err)
 		}
-		day, err := list(st, now(), req.View)
+		day, err := list(st, now(), req.View, req.Batch)
 		if err != nil {
 			return fail("reading the list: %v", err)
 		}
@@ -218,7 +218,7 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 // The names are the terminal app's -- today, week, all, logbook -- because they
 // are the same lists reached by the same letters, and a second vocabulary for
 // the same four things would be one too many.
-func list(st *store.Store, now time.Time, view string) (*BridgeDay, error) {
+func list(st *store.Store, now time.Time, view string, batch int64) (*BridgeDay, error) {
 	out := &BridgeDay{View: view}
 	var seen []*store.Task
 
@@ -244,6 +244,49 @@ func list(st *store.Store, now time.Time, view string) (*BridgeDay, error) {
 			add(strings.ToLower(day.Date.Format("Mon 2 Jan")), false, day.Tasks)
 		}
 		add("unscheduled", false, plan.Unscheduled)
+
+	case "calls":
+		sessions, err := st.Sessions(200)
+		if err != nil {
+			return nil, err
+		}
+		out.Label = "calls"
+		for _, ses := range sessions {
+			name := ses.Title
+			if name == "" {
+				name = untitled(ses.CreatedAt)
+			}
+			// A capture is not a task, but it reads as one here: what it was
+			// called, when it was, and how much of it is still owed.
+			out.Sections = append(out.Sections, BridgeSection{
+				Tasks: []Task{{
+					ID:       ses.ID,
+					Title:    name,
+					Topic:    ses.Source,
+					DueLabel: parse.FormatDue(ses.CreatedAt, now),
+					Priority: 0,
+					Assignee: fmt.Sprintf("%d of %d open", ses.Open(), ses.Total),
+					Tags:     []string{},
+				}},
+			})
+		}
+		out.Total = len(sessions)
+
+	case "call":
+		// One capture, opened from the list of them.
+		tasks, err := st.List(store.Query{
+			View: store.ViewAll, Sort: store.SortManual, Batch: batch}, now)
+		if err != nil {
+			return nil, err
+		}
+		out.Label = "a call"
+		if ses, err := st.Session(batch); err == nil {
+			out.Label = ses.Title
+			if out.Label == "" {
+				out.Label = untitled(ses.CreatedAt)
+			}
+		}
+		add("", false, tasks)
 
 	case "all", "logbook":
 		q := store.Query{View: store.View(view), Sort: store.SortManual}

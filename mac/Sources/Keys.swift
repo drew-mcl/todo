@@ -19,6 +19,9 @@ enum Press: Equatable {
     case leaveTitle
     /// Hand over to the lists, which are the other window this app is.
     case today
+    /// Out of the way with everything left as it is: not filed, not thrown
+    /// away, just not on the screen.
+    case away
     /// Not ours; let the text view have it.
     case pass
 }
@@ -29,6 +32,7 @@ enum Keys {
     static let backspace: UInt16 = 51
     static let z: UInt16 = 6
     static let t: UInt16 = 17
+    static let h: UInt16 = 4
 
     static func press(code: UInt16, command: Bool, inTitle: Bool, canTakeBack: Bool) -> Press {
         switch (code, command) {
@@ -41,6 +45,8 @@ enum Keys {
             return .scrap
         case (t, true):
             return .today
+        case (h, true):
+            return .away
         case (z, true):
             return canTakeBack ? .reverse : .pass
         default:

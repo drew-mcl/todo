@@ -537,3 +537,92 @@ func TestWeekFiltersMatchListFilters(t *testing.T) {
 		}
 	}
 }
+
+// Filing twice for the same call is easy to do -- someone says one more thing
+// after you thought you were finished -- and leaves the record in two pieces.
+func TestMergePutsACallBackTogether(t *testing.T) {
+	st := open(t)
+	now := time.Date(2026, time.August, 25, 9, 0, 0, 0, time.UTC)
+
+	first, err := st.CreateBatch(parse.Parse("prod issue | chase the vendor | today", now).Tasks,
+		Capture{Source: "test", Title: "Platform sync"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateBatch(parse.Parse("prod issue | and the postmortem | eow", now).Tasks,
+		Capture{Source: "test"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := st.Merge(first, []int64{second})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if moved != 1 {
+		t.Errorf("moved %d tasks, want 1", moved)
+	}
+
+	sessions, err := st.Sessions(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("%d captures left, want 1", len(sessions))
+	}
+	if sessions[0].ID != first || sessions[0].Total != 2 {
+		t.Errorf("kept %d with %d tasks", sessions[0].ID, sessions[0].Total)
+	}
+	if sessions[0].Title != "Platform sync" {
+		t.Errorf("the name became %q", sessions[0].Title)
+	}
+
+	// Undo still reaches everything, because it is all one capture now.
+	n, err := st.UndoBatch(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("undo took back %d, want 2", n)
+	}
+}
+
+// A capture with no name takes one from what it swallowed, rather than staying
+// "the 9am on Tuesday" when one of the pieces was named.
+func TestMergeTakesAName(t *testing.T) {
+	st := open(t)
+	now := time.Date(2026, time.August, 25, 9, 0, 0, 0, time.UTC)
+
+	blank, _ := st.CreateBatch(parse.Parse("a | one", now).Tasks, Capture{Source: "test"}, now)
+	named, _ := st.CreateBatch(parse.Parse("a | two", now).Tasks,
+		Capture{Source: "test", Title: "Vendor call"}, now)
+
+	if _, err := st.Merge(blank, []int64{named}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Session(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Vendor call" {
+		t.Errorf("the merged capture is called %q", got.Title)
+	}
+}
+
+// Merging into something that is not there would orphan every task into a
+// batch id that does not exist.
+func TestMergeRefusesAMissingCapture(t *testing.T) {
+	st := open(t)
+	now := time.Date(2026, time.August, 25, 9, 0, 0, 0, time.UTC)
+	only, _ := st.CreateBatch(parse.Parse("a | one", now).Tasks, Capture{Source: "test"}, now)
+
+	if _, err := st.Merge(9999, []int64{only}); err == nil {
+		t.Error("merged into a capture that does not exist")
+	}
+	if _, err := st.Merge(only, []int64{only}); err != nil {
+		t.Errorf("merging something into itself should be a no-op, got %v", err)
+	}
+	if sessions, _ := st.Sessions(10); len(sessions) != 1 {
+		t.Errorf("%d captures left", len(sessions))
+	}
+}

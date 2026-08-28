@@ -163,14 +163,14 @@ export function Capture({
   const [caret, setCaret] = useState(1);
   const [settled, setSettled] = useState(true);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const caret = useRef<number | null>(null);
+  const restoreTo = useRef<number | null>(null);
 
   // A normal-mode key moves the caret as well as the text, and React has just
   // rewritten the value out from under it.
   useLayoutEffect(() => {
-    if (caret.current === null || !ref.current) return;
-    ref.current.setSelectionRange(caret.current, caret.current);
-    caret.current = null;
+    if (restoreTo.current === null || !ref.current) return;
+    ref.current.setSelectionRange(restoreTo.current, restoreTo.current);
+    restoreTo.current = null;
   });
 
   useEffect(() => {
@@ -354,7 +354,7 @@ export function Capture({
                 setMode(out.mode);
                 setPending(out.pending);
                 if (out.value !== draft) setDraft(out.value);
-                caret.current = out.at;
+                restoreTo.current = out.at;
                 // Moving the caret from here does not raise a select event, so
                 // the line it is on has to be said rather than observed.
                 setCaret(out.value.slice(0, out.at).split("\n").length);

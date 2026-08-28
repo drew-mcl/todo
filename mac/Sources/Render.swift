@@ -297,6 +297,9 @@ enum Render {
         let danger = Theme.shared.colour("danger")
         var marked: NSRange?
         var index = 0
+        // A capture is not a task: it opens rather than closes, so it does not
+        // get the mark that means "there is something to tick here".
+        let mark = day.view == "calls" ? "▸ " : "○ "
 
         for section in day.sections {
             if !section.label.isEmpty {
@@ -321,7 +324,7 @@ enum Render {
                     page.append(newline)
                 }
 
-                row { page.put("○ " + task.title, Type.strong, ink) }
+                row { page.put(mark + task.title, Type.strong, ink) }
                 row {
                     page.put("  ● ", Type.mono, Theme.shared.topicColour(day.hues[task.topic]))
                     page.put(task.topic, Type.mono, ink3)

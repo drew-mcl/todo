@@ -51,6 +51,34 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	s.json(w, out)
 }
 
+// handleMergeSessions folds other captures into this one. Filing twice for the
+// same call leaves the record in two pieces; this puts it back together.
+func (s *Server) handleMergeSessions(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		s.errorf(w, http.StatusBadRequest, "That is not a capture.")
+		return
+	}
+	var body struct {
+		Others []int64 `json:"others"`
+	}
+	if err := decode(r, &body); err != nil {
+		s.errorf(w, http.StatusBadRequest, "Could not read which ones to merge.")
+		return
+	}
+	if len(body.Others) == 0 {
+		s.errorf(w, http.StatusUnprocessableEntity, "Nothing was given to merge in.")
+		return
+	}
+
+	moved, err := s.store.Merge(id, body.Others)
+	if err != nil {
+		s.fail(w, err, "merging those captures")
+		return
+	}
+	s.json(w, map[string]any{"moved": moved})
+}
+
 // untitled names a capture that was never given one, so the list still reads as
 // a sequence of events rather than a column of blanks.
 func untitled(t time.Time) string {

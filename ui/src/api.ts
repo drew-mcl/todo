@@ -195,6 +195,8 @@ const post = <T,>(path: string, body?: unknown) =>
 export type KeyGroup = { name: string; keys: { press: string; does: string }[] };
 
 export const api = {
+  mergeSessions: (into: number, others: number[]) =>
+    post<{ moved: number }>(`/api/sessions/${into}/merge`, { others }),
   keys: () => request<{ vim: KeyGroup[] }>("/api/keys").then((r) => r.vim),
   list: (f: Filters) => request<ListResponse>(`/api/list${toQuery(f)}`),
   week: (f: Filters) => request<WeekResponse>(`/api/week${toQuery(f)}`),
