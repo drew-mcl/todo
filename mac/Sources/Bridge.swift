@@ -66,6 +66,23 @@ struct Preview: Decodable {
     let skipped: Int
 }
 
+struct Task: Decodable {
+    let id: Int
+    let topic: String
+    let title: String
+    let dueLabel: String
+    let assignee: String
+    let priority: Int
+}
+
+struct Day: Decodable {
+    let label: String
+    let tasks: [Task]
+    let overdue: [Task]
+    let done: Int
+    let hues: [String: Int]
+}
+
 struct Added: Decodable {
     let batchId: Int
     let added: Int
@@ -80,6 +97,7 @@ struct Reply: Decodable {
     let hues: [String: Int]?
     let added: Added?
     let undone: Int?
+    let day: Day?
 }
 
 /// Bridge owns the child process and matches replies back to the calls that
@@ -198,7 +216,7 @@ final class Bridge {
 
     @discardableResult
     func send(_ op: String, draft: String = "", title: String = "", batch: Int = 0,
-              then handler: @escaping (Reply) -> Void) -> Int {
+              task: Int = 0, then handler: @escaping (Reply) -> Void) -> Int {
         if process == nil && !stopping { start() }
         nextID += 1
         let id = nextID
@@ -208,6 +226,7 @@ final class Bridge {
         if !draft.isEmpty { body["draft"] = draft }
         if !title.isEmpty { body["title"] = title }
         if batch != 0 { body["batch"] = batch }
+        if task != 0 { body["task"] = task }
 
         guard var data = try? JSONSerialization.data(withJSONObject: body) else { return id }
         data.append(0x0A)

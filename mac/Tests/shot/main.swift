@@ -62,18 +62,36 @@ guard let hello = greeted else {
 Theme.shared.adopt(hello.palette)
 Theme.shared.adopt(hello.keys ?? [])
 
-let capture = CaptureController(bridge: bridge)
-capture.panel.setContentSize(NSSize(width: 720, height: 470))
-capture.panel.orderFront(nil)
+// WINDOW=today draws the day instead of the capture box.
+let root: NSView
+if env["WINDOW"] == "today" {
+    var seeded = false
+    bridge.send("capture", draft: draft) { _ in seeded = true }
+    let until = Date().addingTimeInterval(3)
+    while !seeded && Date() < until { pump(0.05) }
 
-guard let root = capture.panel.contentView, let text = draftView(root) else {
-    print("the window did not build")
-    exit(1)
-}
-text.string = draft
-text.didChangeText()
-if env["MODE"] == "normal" {
-    capture.pressForShot("\u{1b}")
+    let today = TodayController(bridge: bridge)
+    today.panel.setContentSize(NSSize(width: 560, height: 440))
+    today.panel.orderFront(nil)
+    today.show()
+    guard let view = today.panel.contentView else {
+        print("the window did not build")
+        exit(1)
+    }
+    root = view
+} else {
+    let capture = CaptureController(bridge: bridge)
+    capture.panel.setContentSize(NSSize(width: 720, height: 470))
+    capture.panel.orderFront(nil)
+
+    guard let view = capture.panel.contentView, let text = draftView(view) else {
+        print("the window did not build")
+        exit(1)
+    }
+    text.string = draft
+    text.didChangeText()
+    if env["MODE"] == "normal" { capture.pressForShot("\u{1b}") }
+    root = view
 }
 
 // The parse is a debounce and a round trip away.

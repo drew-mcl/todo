@@ -10,47 +10,64 @@ import Carbon.HIToolbox
 final class Hotkey {
     static let shared = Hotkey()
 
-    var onFire: (() -> Void)?
-
-    private var ref: EventHotKeyRef?
+    /// What each registered combination should do, by the id it was given.
+    private var actions: [UInt32: () -> Void] = [:]
+    private var refs: [UInt32: EventHotKeyRef] = [:]
+    private var labels: [UInt32: String] = [:]
     private var handler: EventHandlerRef?
 
-    /// What the shortcut is, in the form the menu shows it.
-    private(set) var label = ""
+    /// What a shortcut is, in the form the menu shows it. Empty when it could
+    /// not be claimed, so the menu cannot offer a key belonging to something
+    /// else.
+    func label(_ id: UInt32) -> String { labels[id] ?? "" }
 
     /// Register the combination described by spec ("opt space", "ctrl+opt+t").
-    /// Returns false if the combination is unreadable or already spoken for by
-    /// another application, which is worth saying out loud rather than leaving
-    /// the user pressing a key that does nothing.
+    /// Returns false if it is unreadable or already spoken for by another
+    /// application, which is worth saying out loud rather than leaving the user
+    /// pressing a key that does nothing.
     @discardableResult
-    func register(_ spec: String) -> Bool {
-        unregister()
-        label = ""
+    func register(_ spec: String, id: UInt32, does: @escaping () -> Void) -> Bool {
+        unregister(id)
         guard let combo = Combination(spec) else { return false }
 
         if handler == nil {
             var kind = EventTypeSpec(
                 eventClass: OSType(kEventClassKeyboard),
                 eventKind: UInt32(kEventHotKeyPressed))
-            InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
-                DispatchQueue.main.async { Hotkey.shared.onFire?() }
+            InstallEventHandler(GetApplicationEventTarget(), { _, event, _ -> OSStatus in
+                var pressed = EventHotKeyID()
+                GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                                  EventParamType(typeEventHotKeyID), nil,
+                                  MemoryLayout<EventHotKeyID>.size, nil, &pressed)
+                let id = pressed.id
+                DispatchQueue.main.async { Hotkey.shared.fire(id) }
                 return noErr
             }, 1, &kind, nil, &handler)
         }
 
-        let id = EventHotKeyID(signature: OSType(0x544F444F), id: 1) // 'TODO'
+        var ref: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: OSType(0x544F444F), id: id) // 'TODO'
         let status = RegisterEventHotKey(
-            combo.key, combo.modifiers, id, GetApplicationEventTarget(), 0, &ref)
-        guard status == noErr else { return false }
-        // Named only once it is really ours, so the menu cannot offer a
-        // shortcut that belongs to something else.
-        label = combo.label
+            combo.key, combo.modifiers, hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        guard status == noErr, let ref else { return false }
+
+        refs[id] = ref
+        labels[id] = combo.label
+        actions[id] = does
         return true
     }
 
-    func unregister() {
-        if let ref { UnregisterEventHotKey(ref) }
-        ref = nil
+    private func fire(_ id: UInt32) { actions[id]?() }
+
+    func unregister(_ id: UInt32) {
+        if let ref = refs[id] { UnregisterEventHotKey(ref) }
+        refs[id] = nil
+        labels[id] = nil
+        actions[id] = nil
+    }
+
+    func unregisterAll() {
+        for id in refs.keys { unregister(id) }
     }
 
     /// Combination reads "cmd+shift+space" and the like.

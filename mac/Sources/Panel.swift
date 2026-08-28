@@ -7,9 +7,9 @@ import AppKit
 /// screen behind it. It does not take a Space of its own and it does not send
 /// you back to a desktop to reach it.
 final class CapturePanel: NSPanel {
-    init() {
+    init(size: NSSize = NSSize(width: 720, height: 470)) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 470),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel, .resizable],
             backing: .buffered, defer: false)
 

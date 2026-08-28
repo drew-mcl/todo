@@ -8,11 +8,44 @@ import AppKit
 // terminal app and the web one do, so what you type here is on the list before
 // the window has finished closing.
 
-let defaultHotkey = "opt space"
+// One key each, and each one free on a stock machine. The window they open is
+// the whole application: there is nothing else to find.
+enum Shortcut: UInt32 {
+    case capture = 1
+    case today = 2
+    case web = 3
+
+    var setting: String {
+        switch self {
+        case .capture: return "hotkey"
+        case .today: return "hotkeyToday"
+        case .web: return "hotkeyWeb"
+        }
+    }
+
+    /// The web one has no default: a global key that steals ⌥W from every text
+    /// field on the machine is not worth a browser tab.
+    var fallback: String? {
+        switch self {
+        case .capture: return "opt space"
+        case .today: return "ctrl+opt+space"
+        case .web: return nil
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .capture: return "Capture"
+        case .today: return "Today"
+        case .web: return "Open in a browser"
+        }
+    }
+}
 
 final class Bar: NSObject, NSApplicationDelegate {
     private var bridge: Bridge?
     private var capture: CaptureController?
+    private var today: TodayController?
     private var status: NSStatusItem?
 
     /// What is wrong, if anything. A hotkey that could not be claimed is
@@ -52,17 +85,17 @@ final class Bar: NSObject, NSApplicationDelegate {
         }
 
         capture = CaptureController(bridge: bridge)
+        today = TodayController(bridge: bridge)
 
-        let spec = UserDefaults.standard.string(forKey: "hotkey") ?? defaultHotkey
-        Hotkey.shared.onFire = { [weak self] in self?.capture?.toggle() }
-        if !Hotkey.shared.register(spec) {
-            trouble = "\(spec) is taken or unreadable"
-            if spec != defaultHotkey && Hotkey.shared.register(defaultHotkey) {
-                trouble = "\(spec) is taken — using \(defaultHotkey) instead"
-            } else if Hotkey.shared.label.isEmpty {
-                trouble = "\(spec) is taken by something else"
-            }
-        }
+        // The day window hands over to the capture box rather than knowing how
+        // to open one itself.
+        NotificationCenter.default.addObserver(
+            forName: .todoCapture, object: nil, queue: .main
+        ) { [weak self] _ in self?.capture?.show() }
+
+        claim(.capture) { [weak self] in self?.capture?.toggle() }
+        claim(.today) { [weak self] in self?.today?.toggle() }
+        claim(.web) { [weak self] in self?.openWeb() }
         refreshMenu()
     }
 
@@ -74,8 +107,19 @@ final class Bar: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        Hotkey.shared.unregister()
+        Hotkey.shared.unregisterAll()
         bridge?.stop()
+    }
+
+    /// Claim a shortcut, and say so in the menu if it could not be had. A key
+    /// another application owns is otherwise perfectly silent: you press it,
+    /// nothing happens, and nothing anywhere says why.
+    private func claim(_ which: Shortcut, does: @escaping () -> Void) {
+        let spec = UserDefaults.standard.string(forKey: which.setting) ?? which.fallback
+        guard let spec, !spec.isEmpty else { return }
+        if !Hotkey.shared.register(spec, id: which.rawValue, does: does) {
+            trouble = "\(spec) is taken by something else"
+        }
     }
 
     // ── the menu bar ────────────────────────────────────────────────────────
@@ -95,20 +139,30 @@ final class Bar: NSObject, NSApplicationDelegate {
             said.isEnabled = false
             menu.addItem(.separator())
         }
-        let shortcut = Hotkey.shared.label.isEmpty ? "" : "  " + Hotkey.shared.label
-        menu.addItem(withTitle: "Capture" + shortcut, action: #selector(openCapture), keyEquivalent: "")
-        menu.addItem(withTitle: "Open todo in a browser", action: #selector(openWeb), keyEquivalent: "")
+
+        let doors: [(Shortcut, Selector)] = [
+            (.capture, #selector(openCapture)),
+            (.today, #selector(openToday)),
+            (.web, #selector(openWeb)),
+        ]
+        for (which, action) in doors {
+            let shortcut = Hotkey.shared.label(which.rawValue)
+            let item = menu.addItem(
+                withTitle: which.name + (shortcut.isEmpty ? "" : "  " + shortcut),
+                action: action, keyEquivalent: "")
+            item.target = self
+        }
+
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        for entry in menu.items where entry.action == #selector(openCapture) || entry.action == #selector(openWeb) {
-            entry.target = self
-        }
         status?.menu = menu
     }
 
+    @objc private func openToday() { today?.show() }
+
     @objc private func openCapture() { capture?.show() }
 
-    @objc private func openWeb() {
+    @objc func openWeb() {
         guard let binary = Bridge.locate() else { return }
         let serve = Process()
         serve.executableURL = URL(fileURLWithPath: binary)

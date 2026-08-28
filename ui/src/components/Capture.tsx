@@ -46,9 +46,15 @@ const BANGS = ["", "!", "!!", "!!!"];
 function Preview({
   data,
   onPromote,
+  /** The line the caret is on, and whether typing has stopped. Until it has,
+   *  that line is not told off: half a line is not yet a mistake. */
+  caret,
+  settled,
 }: {
   data?: PreviewResponse;
   onPromote: (line: number) => void;
+  caret: number;
+  settled: boolean;
 }) {
   if (!data || data.lines.length === 0) {
     return (
@@ -71,6 +77,7 @@ function Preview({
       <p className="mb-2 font-mono text-xs tracking-wide text-ink-4 uppercase">{summary}</p>
       <ol className="space-y-px">
         {data.lines.map((line) => {
+          const hush = line.n === caret && !settled;
           if (line.kind === "task" && line.task) {
             return (
               <li key={line.n} className="border-t border-line-soft py-1.5 first:border-t-0">
@@ -95,7 +102,7 @@ function Preview({
                     <p className="basis-full text-sm text-ink-3">{line.task.note}</p>
                   )}
                 </div>
-                {line.task.warning && (
+                {line.task.warning && !hush && (
                   <p className="mt-1 pl-3 font-mono text-xs text-danger">{line.task.warning}</p>
                 )}
               </li>
@@ -109,18 +116,24 @@ function Preview({
               </li>
             );
           }
+          // A line with nothing on it yet is not worth a row at all.
+          if (hush && !line.raw.trim()) return null;
           return (
             <li key={line.n} className="flex flex-wrap items-baseline gap-2 border-t border-line-soft py-1.5">
               <span className="flex-1 line-through decoration-line">
                 <Shorthand tokens={line.tokens} dim />
               </span>
-              <span className="font-mono text-xs text-ink-4">{line.reason}</span>
-              <button
-                onClick={() => onPromote(line.n)}
-                className="rounded-full border border-line px-2 py-px font-mono text-xs text-ink-3 hover:border-ink-4 hover:text-ink"
-              >
-                make a task
-              </button>
+              {!hush && (
+                <>
+                  <span className="font-mono text-xs text-ink-4">{line.reason}</span>
+                  <button
+                    onClick={() => onPromote(line.n)}
+                    className="rounded-full border border-line px-2 py-px font-mono text-xs text-ink-3 hover:border-ink-4 hover:text-ink"
+                  >
+                    make a task
+                  </button>
+                </>
+              )}
             </li>
           );
         })}
@@ -147,6 +160,8 @@ export function Capture({
   const [mode, setMode] = useState<Mode>("insert");
   const [pending, setPending] = useState("");
   const [sheet, setSheet] = useState(false);
+  const [caret, setCaret] = useState(1);
+  const [settled, setSettled] = useState(true);
   const ref = useRef<HTMLTextAreaElement>(null);
   const caret = useRef<number | null>(null);
 
@@ -166,6 +181,20 @@ export function Capture({
     el?.focus();
     el?.setSelectionRange(el.value.length, el.value.length);
   }, [open, tab]);
+
+  /** The line the caret is on, counting from one the way the parser does. */
+  function trackCaret(el: HTMLTextAreaElement) {
+    setCaret(el.value.slice(0, el.selectionStart).split("\n").length);
+  }
+
+  // A line being typed is not told off until you have stopped. The complaint is
+  // still coming -- it just waits for you to finish the word.
+  useEffect(() => {
+    if (!open) return;
+    setSettled(false);
+    const id = setTimeout(() => setSettled(true), 700);
+    return () => clearTimeout(id);
+  }, [draft, open]);
 
   // The parse is debounced but always server-side: one parser, and this is it.
   useEffect(() => {
@@ -292,7 +321,11 @@ export function Capture({
               ref={ref}
               value={draft}
               spellCheck={false}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                trackCaret(e.currentTarget);
+              }}
+              onSelect={(e) => trackCaret(e.currentTarget)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -332,7 +365,7 @@ export function Capture({
             />
 
             <div className="h-[clamp(150px,30vh,330px)] shrink-0 overflow-y-auto border-t border-line-soft bg-sunk px-6 py-3">
-              <Preview data={preview} onPromote={promote} />
+              <Preview data={preview} onPromote={promote} caret={caret} settled={settled} />
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-line-soft px-6 py-3">

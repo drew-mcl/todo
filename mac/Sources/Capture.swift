@@ -55,6 +55,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private var hues: [String: Int] = [:]
     private var awaiting = 0
     private var debounce: Timer?
+    private var settle: Timer?
+    private var lastTyped = Date.distantPast
     private var monitor: Any?
     private var notice: NSAttributedString?
     private var vim = VimState(text: "", at: 0)
@@ -102,6 +104,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(draft)
         draft.setSelectedRange(NSRange(location: draft.string.utf16.count, length: 0))
+        lastTyped = .distantPast
         vim = VimState(text: draft.string, at: draft.selectedRange().location)
         showMode()
         installMonitor()
@@ -247,6 +250,13 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     func textDidChange(_ notification: Notification) {
         // Anything the window was saying is about the draft as it was.
         notice = nil
+        // A line being typed is not told off until you have stopped. The
+        // complaint is still coming -- it just waits for you to finish.
+        lastTyped = Date()
+        settle?.invalidate()
+        settle = Timer.scheduledTimer(withTimeInterval: Self.quietFor + 0.02, repeats: false) {
+            [weak self] _ in self?.render()
+        }
         // Debounced, because the answer comes from another process; short
         // enough that the parse still lands while you are looking at the line.
         debounce?.invalidate()
@@ -415,9 +425,14 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         ]
     }
 
+    /// How long the line under the caret gets before it is told what is wrong
+    /// with it. Long enough not to interrupt a word, short enough to be help.
+    private static let quietFor: TimeInterval = 0.7
+
     private func drawPreview() {
         guard let storage = previewView.textStorage else { return }
-        let (text, marked) = Render.preview(latest, hues: hues, caret: caretLine)
+        let settled = Date().timeIntervalSince(lastTyped) > Self.quietFor
+        let (text, marked) = Render.preview(latest, hues: hues, caret: caretLine, settled: settled)
         storage.setAttributedString(text)
         // Follow the line being typed rather than sitting at the top of a page
         // you typed several minutes ago.
@@ -599,7 +614,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     /// The one incantation for a text view inside a scroll view, with every
     /// helpful substitution turned off: smart quotes and smart dashes rewrite
     /// the very characters the grammar is made of.
-    private static func textView(editable: Bool) -> (NSScrollView, NSTextView) {
+    static func textView(editable: Bool) -> (NSScrollView, NSTextView) {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false

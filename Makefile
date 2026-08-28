@@ -54,6 +54,8 @@ bar-install: bar install
 		> "$$HOME/Library/LaunchAgents/$(BAR_ID).plist"
 	@launchctl unload "$$HOME/Library/LaunchAgents/$(BAR_ID).plist" 2>/dev/null || true
 	@launchctl load "$$HOME/Library/LaunchAgents/$(BAR_ID).plist"
+	@# launchd's own start races the copy above, so ask for it directly too.
+	@open -a "$$HOME/Applications/todo capture.app"
 	@echo "the capture bar is in the menu bar and starts at login -- ⌥Space opens it"
 
 ## bar-uninstall: stop it and take it back off
@@ -77,12 +79,20 @@ test-ui:
 SWIFT = swiftc -swift-version 5 -target $(shell uname -m)-apple-macos13 \
 	-sdk $(shell xcrun --show-sdk-path) -framework AppKit -framework Carbon
 
-## shot: draw the capture window to mac/build/shot.png, to look at it
+# So that both `DRAFT=... make shot` and `make shot DRAFT=...` reach the program.
+export DRAFT
+export WINDOW
+export MODE
+
+## shot: draw a window to mac/build/shot.png, to look at it
+##   make shot                       the capture box
+##   make shot WINDOW=today          the day
+##   make shot DRAFT="topic | thing" your own lines
 shot: build
 	@mkdir -p mac/build
 	$(SWIFT) -o mac/build/shot $(BAR_LIB) mac/Tests/shot/main.swift
 	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db \
-		SHOT=$$PWD/mac/build/shot.png DRAFT=$(DRAFT) mac/build/shot
+		SHOT=$$PWD/mac/build/shot.png mac/build/shot
 
 ## test-bar: the capture bar, against a live bridge (needs Swift)
 test-bar: build

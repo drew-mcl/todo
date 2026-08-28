@@ -159,6 +159,55 @@ func TestBridgeCapturesAndUndoes(t *testing.T) {
 	}
 }
 
+// The day window holds no list of its own, so the bridge has to hand it one --
+// and closing something out has to come back as the day, not as a promise.
+func TestBridgeServesTheDay(t *testing.T) {
+	replies := talk(t,
+		BridgeRequest{ID: 1, Op: "capture",
+			Draft: "prod issue | chase the vendor | today @sam !!\n" +
+				"admin | pull the numbers | today\n" +
+				"personal | book the dentist | 2026-08-20"},
+		BridgeRequest{ID: 2, Op: "today"},
+	)
+
+	day := replies[1].Day
+	if day == nil {
+		t.Fatalf("no day came back: %s", replies[1].Error)
+	}
+	if len(day.Tasks) != 2 {
+		t.Errorf("%d due today, want 2", len(day.Tasks))
+	}
+	if len(day.Overdue) != 1 {
+		t.Errorf("%d overdue, want 1", len(day.Overdue))
+	}
+	if day.Overdue[0].DueLabel == "" {
+		t.Error("an overdue task came back without a label to show for it")
+	}
+	if day.Label == "" {
+		t.Error("the day has no name")
+	}
+	if _, ok := day.Hues["prod issue"]; !ok {
+		t.Errorf("no colour for a topic on screen: %v", day.Hues)
+	}
+
+	// Closing one out answers with the day it left behind.
+	after := talk(t,
+		BridgeRequest{ID: 1, Op: "capture", Draft: "admin | pull the numbers | today"},
+		BridgeRequest{ID: 2, Op: "today"},
+	)
+	id := after[1].Day.Tasks[0].ID
+	closed := talk(t,
+		BridgeRequest{ID: 1, Op: "capture", Draft: "admin | pull the numbers | today"},
+		BridgeRequest{ID: 2, Op: "toggle", Task: id},
+	)[1]
+	if closed.Day == nil {
+		t.Fatalf("toggle did not answer with the day: %s", closed.Error)
+	}
+	if len(closed.Day.Tasks) != 0 || closed.Day.Done != 1 {
+		t.Errorf("after closing one: %d left, %d done", len(closed.Day.Tasks), closed.Day.Done)
+	}
+}
+
 // An unknown op is answered rather than dropped, so a bar built against a newer
 // binary does not simply hang.
 func TestBridgeAnswersEveryRequest(t *testing.T) {

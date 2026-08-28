@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/drew-mcl/todo/internal/palette"
@@ -29,6 +30,7 @@ type BridgeRequest struct {
 	Draft string `json:"draft,omitempty"`
 	Title string `json:"title,omitempty"`
 	Batch int64  `json:"batch,omitempty"`
+	Task  int64  `json:"task,omitempty"`
 }
 
 // BridgeReply is one line of output. Exactly one of the result fields is set.
@@ -43,6 +45,7 @@ type BridgeReply struct {
 	Hues   map[string]int `json:"hues,omitempty"`
 	Added  *BridgeAdded   `json:"added,omitempty"`
 	Undone *int           `json:"undone,omitempty"`
+	Day    *BridgeDay     `json:"day,omitempty"`
 }
 
 // BridgeHello is what the bar needs before it can draw anything: the version it
@@ -76,6 +79,16 @@ type BridgeAdded struct {
 	BatchID int64 `json:"batchId"`
 	Added   int   `json:"added"`
 	Today   int   `json:"today"`
+}
+
+// BridgeDay is today, for the window that shows it: what is due, what has
+// slipped, and how much of it is already done.
+type BridgeDay struct {
+	Label   string         `json:"label"`
+	Tasks   []Task         `json:"tasks"`
+	Overdue []Task         `json:"overdue"`
+	Done    int            `json:"done"`
+	Hues    map[string]int `json:"hues"`
 }
 
 // bridgeVersion changes when the wire shapes do, so a stale bar can say so
@@ -157,6 +170,23 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 			Today:   counts[store.ViewToday],
 		}
 
+	case "today":
+		day, err := today(st, now())
+		if err != nil {
+			return fail("reading the day: %v", err)
+		}
+		reply.Day = day
+
+	case "toggle":
+		if _, err := st.Toggle(req.Task, now()); err != nil {
+			return fail("closing that one: %v", err)
+		}
+		day, err := today(st, now())
+		if err != nil {
+			return fail("reading the day: %v", err)
+		}
+		reply.Day = day
+
 	case "undo":
 		n, err := st.UndoBatch(req.Batch)
 		if err != nil {
@@ -168,6 +198,35 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 		return fail("there is no %q operation", req.Op)
 	}
 	return reply
+}
+
+// today is the day as the window shows it: what is due, then what has slipped,
+// which is the order you would want to be asked about them in.
+func today(st *store.Store, now time.Time) (*BridgeDay, error) {
+	due, err := st.List(store.Query{View: store.ViewToday, Sort: store.SortManual}, now)
+	if err != nil {
+		return nil, err
+	}
+	late, err := st.List(store.Query{View: store.ViewOverdue, Sort: store.SortManual}, now)
+	if err != nil {
+		return nil, err
+	}
+	done, err := st.DoneOn(now)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(due)+len(late))
+	for _, t := range append(append([]*store.Task{}, due...), late...) {
+		names = append(names, t.Topic)
+	}
+	return &BridgeDay{
+		Label:   strings.ToLower(now.Format("Mon 2 January")),
+		Tasks:   taskDTOs(due, now),
+		Overdue: taskDTOs(late, now),
+		Done:    done,
+		Hues:    palette.Assign(names),
+	}, nil
 }
 
 // previewHues gives every topic in a draft a colour of its own, by the same

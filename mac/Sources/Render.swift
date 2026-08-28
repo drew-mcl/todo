@@ -48,8 +48,11 @@ enum Render {
     /// quiet detail underneath it, then a gap. They shared a line and three
     /// different left edges before, which put a 13pt face and an 11pt one on
     /// one baseline and read as a jumble rather than a list.
-    static func preview(_ preview: Preview?, hues: [String: Int], caret: Int)
-        -> (NSAttributedString, NSRange?) {
+    /// `settled` is whether typing has paused. Until it has, the line under the
+    /// caret is not told off: half a line is not yet a mistake, and a complaint
+    /// that appears before you have finished the word is only noise.
+    static func preview(_ preview: Preview?, hues: [String: Int], caret: Int,
+                        settled: Bool = true) -> (NSAttributedString, NSRange?) {
         guard let preview, !preview.lines.isEmpty else {
             return (quiet("your lines appear here as they will be filed", "ink4"), nil)
         }
@@ -60,6 +63,8 @@ enum Render {
         for line in preview.lines {
             let start = out.length
             var rows: [NSAttributedString] = []
+            // Still being written, and not finished being wrong.
+            let hush = line.n == caret && !settled
 
             switch line.kind {
             case "task":
@@ -70,7 +75,7 @@ enum Render {
                         rows.append(quiet("↳ " + task.note.replacingOccurrences(of: "\n", with: " "),
                                           "ink3"))
                     }
-                    if !task.warning.isEmpty {
+                    if !task.warning.isEmpty && !hush {
                         rows.append(NSAttributedString(string: task.warning, attributes: [
                             .font: Type.mono, .foregroundColor: Theme.shared.colour("danger"),
                         ]))
@@ -82,8 +87,10 @@ enum Render {
                 // read the line twice.
                 continue
             default:
+                // A line with nothing on it yet is not worth a block at all.
+                if hush && line.raw.trimmingCharacters(in: .whitespaces).isEmpty { continue }
                 rows.append(struck(line.raw))
-                rows.append(quiet(line.reason ?? "skipped", "ink4"))
+                if !hush { rows.append(quiet(line.reason ?? "skipped", "ink4")) }
             }
 
             let live = line.n == caret
@@ -210,6 +217,101 @@ enum Render {
             out.append(part)
         }
         return out
+    }
+
+    /// Where the cursor's row landed, so the list can be scrolled to it.
+    private(set) static var dayCursorRange: NSRange?
+
+    /// The day: what is due, then what has slipped. One task to a block, the
+    /// same shape the preview uses, so the two windows read as one app.
+    static func day(_ day: Day, cursor: Int) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        dayCursorRange = nil
+        var index = 0
+
+        func section(_ name: String, _ tasks: [Task], late: Bool) {
+            guard !tasks.isEmpty else { return }
+            out.append(NSAttributedString(string: "  "))
+            out.append(NSAttributedString(string: name.uppercased(), attributes: [
+                .font: Type.heading,
+                .foregroundColor: Theme.shared.colour(late ? "danger" : "ink4"),
+                .kern: 0.8,
+                .paragraphStyle: dayParagraph(last: true),
+            ]))
+            out.append(NSAttributedString(string: "\n"))
+
+            for task in tasks {
+                let live = index == cursor
+                for (i, row) in [title(task), line(task, hue: day.hues[task.topic], late: late)]
+                    .enumerated() {
+                    let piece = NSMutableAttributedString(
+                        string: live ? "▏ " : "  ",
+                        attributes: [
+                            .font: Type.mono,
+                            .foregroundColor: Theme.shared.colour(live ? "accent" : "sunk"),
+                        ])
+                    piece.append(row)
+                    piece.addAttribute(.paragraphStyle, value: dayParagraph(last: i == 1),
+                                       range: NSRange(location: 0, length: piece.length))
+                    if live && dayCursorRange == nil {
+                        dayCursorRange = NSRange(location: out.length, length: piece.length)
+                    }
+                    out.append(piece)
+                    out.append(NSAttributedString(string: "\n"))
+                }
+                index += 1
+            }
+        }
+
+        section("due today", day.tasks, late: false)
+        section("overdue", day.overdue, late: true)
+
+        if out.length == 0 {
+            return quiet(day.done > 0
+                ? "that is today done. \(day.done) closed."
+                : "nothing due today.", "ink3")
+        }
+        return out
+    }
+
+    private static func title(_ task: Task) -> NSAttributedString {
+        NSAttributedString(string: "○ " + task.title, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium),
+            .foregroundColor: Theme.shared.colour("ink"),
+        ])
+    }
+
+    private static func line(_ task: Task, hue: Int?, late: Bool) -> NSAttributedString {
+        let out = NSMutableAttributedString(string: "  ● ", attributes: [
+            .font: Type.mono, .foregroundColor: Theme.shared.topicColour(hue),
+        ])
+        out.append(quiet(task.topic, "ink3"))
+        if !task.dueLabel.isEmpty {
+            out.append(quiet(" · ", "ink4"))
+            out.append(NSAttributedString(string: task.dueLabel.lowercased(), attributes: [
+                .font: Type.mono,
+                .foregroundColor: Theme.shared.colour(late ? "danger" : "accent"),
+            ]))
+        }
+        if !task.assignee.isEmpty {
+            out.append(quiet(" · ", "ink4"))
+            out.append(quiet(task.assignee, "ink3"))
+        }
+        if task.priority > 0 {
+            out.append(quiet(" · ", "ink4"))
+            out.append(NSAttributedString(
+                string: String(repeating: "!", count: task.priority),
+                attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("danger")]))
+        }
+        return out
+    }
+
+    private static func dayParagraph(last: Bool) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 1
+        style.paragraphSpacing = last ? 9 : 0
+        style.headIndent = 22
+        return style
     }
 
     /// A section label: the small, spaced capitals the other two front ends use.

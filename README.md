@@ -142,14 +142,26 @@ The hotkey is `⌥Space` unless you say otherwise:
 defaults write com.drew-mcl.todo.capture hotkey "ctrl+opt+t"
 ```
 
+`⌃⌥Space` shows the day instead: what is due, what has slipped, `j`/`k` to move
+and `x` to close one out. It holds no list of its own — the same database the
+other two front ends read, so ticking something here is ticked everywhere by the
+time the window has closed. `n` hands over to the capture box.
+
+The browser is a menu item away, or give it a key of its own:
+
+```
+defaults write com.drew-mcl.todo.capture hotkeyToday "ctrl+opt+t"
+defaults write com.drew-mcl.todo.capture hotkeyWeb   "ctrl+opt+w"
+```
+
 The box has vim keys in it — `hjkl`, `w b e`, `0 ^ $`, `gg G`, `dd D cc x`, and
 the usual ways back to typing. `⌘/` shows the list. The browser's box has the
 same ones, from the same list: it lives in `internal/vim` and is served to both,
 so neither reference can promise a key only one of them answers.
 
 `make bar` builds it without installing; `make bar-uninstall` takes it back off.
-`make shot` draws the window to `mac/build/shot.png`, which is how it gets looked
-at without a screenshot.
+`make shot` draws a window to `mac/build/shot.png` — `WINDOW=today` for the other
+one — which is how they get looked at without a screenshot.
 Nothing about it is required — the terminal app and the web one do not know it
 is there.
 
