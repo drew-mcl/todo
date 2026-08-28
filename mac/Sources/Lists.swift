@@ -22,13 +22,11 @@ final class ListController: NSObject, NSWindowDelegate {
     private let meter = NSTextField(labelWithString: "")
     private let keys = NSTextField(labelWithString: "")
     private var list: NSTextView!
-    private var listScroll: NSScrollView!
 
     private var day: Day?
     private var view = "today"
     private var cursor = 0
     private var monitor: Any?
-    private var previousApp: NSRunningApplication?
 
     init(bridge: Bridge) {
         self.bridge = bridge
@@ -39,7 +37,7 @@ final class ListController: NSObject, NSWindowDelegate {
 
     // ── the window ──────────────────────────────────────────────────────────
 
-    func toggle() { panel.isVisible && panel.isKeyWindow ? hide() : show() }
+    func toggle() { panel.isVisible && panel.isKeyWindow ? hide() : show(view) }
 
     func show(_ which: String = "today") {
         if which != view {
@@ -51,7 +49,7 @@ final class ListController: NSObject, NSWindowDelegate {
     }
 
     private func appear() {
-        previousApp = NSWorkspace.shared.frontmostApplication
+        Interrupted.remember()
         if !panel.isVisible { panel.positionOnActiveScreen() }
         panel.level = .floating
         NSApp.activate(ignoringOtherApps: true)
@@ -61,10 +59,14 @@ final class ListController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
+        conceal()
+        Interrupted.restore()
+    }
+
+    /// Out of the way, but still ours. See CaptureController.conceal.
+    func conceal() {
         removeMonitor()
         panel.orderOut(nil)
-        previousApp?.activate()
-        previousApp = nil
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -123,7 +125,7 @@ final class ListController: NSObject, NSWindowDelegate {
 
         case "n":
             // Back into the box, which is the other half of this.
-            hide()
+            conceal()
             NotificationCenter.default.post(name: .todoCapture, object: nil)
         default:
             return false
@@ -174,11 +176,13 @@ final class ListController: NSObject, NSWindowDelegate {
                 ? (day.open + day.done == 0
                     ? "NOTHING DUE"
                     : "\(day.done) OF \(day.open + day.done) DONE")
-                : (total == 1 ? "1 TASK" : "\(total) TASKS"))
+                : (day.truncated == true
+                    ? "\(total) OF \(day.total ?? total)"
+                    : (total == 1 ? "1 TASK" : "\(total) TASKS")))
 
-        list.textStorage?.setAttributedString(
-            Render.day(day, cursor: cursor))
-        if let marked = Render.dayCursorRange { list.scrollRangeToVisible(marked) }
+        let (text, marked) = Render.day(day, cursor: cursor)
+        list.textStorage?.setAttributedString(text)
+        if let marked { list.scrollRangeToVisible(marked) }
     }
 
     // ── layout ──────────────────────────────────────────────────────────────
@@ -188,7 +192,6 @@ final class ListController: NSObject, NSWindowDelegate {
 
         let (scroll, text) = CaptureController.textView(editable: false)
         list = text
-        listScroll = scroll
         list.textContainerInset = NSSize(width: 18, height: 12)
 
         let headRule = NSBox()

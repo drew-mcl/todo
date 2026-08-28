@@ -62,35 +62,3 @@ func Reference() []Group {
 		}},
 	}
 }
-
-// Presses is every key on the reference, flattened -- what a front end has to
-// be able to answer. The multi-key entries are split, because "h  j  k  l" is
-// four bindings written economically.
-func Presses() []string {
-	var out []string
-	for _, g := range Reference() {
-		for _, k := range g.Keys {
-			out = append(out, fields(k.Press)...)
-		}
-	}
-	return out
-}
-
-// fields splits on runs of spaces without pulling in strings for one use.
-func fields(s string) []string {
-	var out []string
-	start := -1
-	for i := 0; i <= len(s); i++ {
-		if i == len(s) || s[i] == ' ' {
-			if start >= 0 {
-				out = append(out, s[start:i])
-				start = -1
-			}
-			continue
-		}
-		if start < 0 {
-			start = i
-		}
-	}
-	return out
-}

@@ -51,3 +51,27 @@ final class CapturePanel: NSPanel {
             y: visible.minY + (visible.height - size.height) * 0.68))
     }
 }
+
+/// Who we interrupted.
+///
+/// Both windows put the keyboard back where they found it when they close. Held
+/// here rather than in each of them, because hopping from the box to the lists
+/// used to hand focus to the app underneath and immediately take it again --
+/// one flicker per keystroke, and whichever app happened to be frontmost during
+/// it became the one we thought we had interrupted.
+enum Interrupted {
+    private(set) static var app: NSRunningApplication?
+
+    /// Remembered once, on the way in, and not overwritten by our own windows.
+    static func remember() {
+        guard app == nil else { return }
+        let front = NSWorkspace.shared.frontmostApplication
+        guard front?.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        app = front
+    }
+
+    static func restore() {
+        app?.activate()
+        app = nil
+    }
+}

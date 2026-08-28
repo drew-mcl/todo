@@ -7,6 +7,46 @@ import AppKit
 // the preview has to mark the line the caret is on. Both are pure functions of
 // what came back down the bridge, so mac/Tests exercises them directly.
 
+/// A page being built.
+///
+/// Appending to the string and setting attributes over the range is the cheap
+/// way round: the obvious one makes an NSAttributedString for every coloured
+/// fragment, and a page of blocks is twenty of those each, thrown away on every
+/// keystroke.
+struct Page {
+    let out = NSMutableAttributedString()
+
+    var length: Int { out.length }
+
+    /// Every append to the backing string makes the whole thing re-check its
+    /// attributes, which turns building a page into O(page²). Batched, it is
+    /// checked once at the end.
+    func begin() { out.beginEditing() }
+    func end() { out.endEditing() }
+
+    func put(_ text: String, _ font: NSFont, _ colour: NSColor,
+             extra: [NSAttributedString.Key: Any] = [:]) {
+        guard !text.isEmpty else { return }
+        let start = out.length
+        out.mutableString.append(text)
+        var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colour]
+        attributes.merge(extra) { _, new in new }
+        out.setAttributes(attributes, range: NSRange(location: start, length: out.length - start))
+    }
+
+    /// A run that is always the same is built once and appended, which is ten
+    /// times cheaper than writing the text and then saying what colour it is.
+    func append(_ ready: NSAttributedString) { out.append(ready) }
+
+    /// Lay a paragraph style over everything written since `from`, which is how
+    /// a block gets its gap without every fragment carrying one.
+    func space(from: Int, _ style: NSParagraphStyle) {
+        guard out.length > from else { return }
+        out.addAttribute(.paragraphStyle, value: style,
+                         range: NSRange(location: from, length: out.length - from))
+    }
+}
+
 enum Render {
     /// Where each highlighted span falls in text.
     ///
@@ -52,83 +92,110 @@ enum Render {
     /// caret is not told off: half a line is not yet a mistake, and a complaint
     /// that appears before you have finished the word is only noise.
     static func preview(_ preview: Preview?, hues: [String: Int], caret: Int,
-                        settled: Bool = true) -> (NSAttributedString, NSRange?) {
+                        settled: Bool = true) -> (NSAttributedString, [Int: NSRange]) {
         guard let preview, !preview.lines.isEmpty else {
-            return (quiet("your lines appear here as they will be filed", "ink4"), nil)
+            return (quiet("your lines appear here as they will be filed", "ink4"), [:])
         }
 
-        let out = NSMutableAttributedString()
-        var marked: NSRange?
+        let page = Page()
+        page.begin()
+        defer { page.end() }
+        let ink = Theme.shared.colour("ink")
+        let ink3 = Theme.shared.colour("ink3")
+        let ink4 = Theme.shared.colour("ink4")
+        let danger = Theme.shared.colour("danger")
+        var blocks: [Int: NSRange] = [:]
 
         for line in preview.lines {
-            let start = out.length
-            var rows: [NSAttributedString] = []
+            let start = page.length
             // Still being written, and not finished being wrong.
             let hush = line.n == caret && !settled
+            let live = line.n == caret
+
+            /// The bar runs down the whole block, one row at a time, so it marks
+            /// the line being typed the way the terminal's does. It is always
+            /// drawn and sometimes invisible, so moving it is a change of colour
+            /// rather than a change of text.
+            // A paragraph takes its style from its first character, so the gap
+            // has to be laid over the whole of the last row, not its newline.
+            var lastRow = page.length
+            func row(_ body: () -> Void) {
+                lastRow = page.length
+                page.append(live ? barLit : barDark)
+                body()
+                page.append(newline)
+            }
 
             switch line.kind {
             case "task":
-                if let task = line.task {
-                    rows.append(strong(task.title))
-                    rows.append(meta(task, hue: hues[task.topic]))
-                    if !task.note.isEmpty {
-                        rows.append(quiet("↳ " + task.note.replacingOccurrences(of: "\n", with: " "),
-                                          "ink3"))
-                    }
-                    if !task.warning.isEmpty && !hush {
-                        rows.append(NSAttributedString(string: task.warning, attributes: [
-                            .font: Type.mono, .foregroundColor: Theme.shared.colour("danger"),
-                        ]))
+                guard let task = line.task else { continue }
+                row { page.put(task.title, Type.strong, ink) }
+                row { meta(page, task, hue: hues[task.topic]) }
+                if !task.note.isEmpty {
+                    row {
+                        page.put("↳ " + task.note.replacingOccurrences(of: "\n", with: " "),
+                                 Type.mono, ink3)
                     }
                 }
+                if !task.warning.isEmpty && !hush {
+                    row { page.put(task.warning, Type.mono, danger) }
+                }
+
             case "note":
                 // It is already shown under the task it belongs to. Printing it
                 // again, with its own arrow, only made the list look like it had
                 // read the line twice.
                 continue
+
             default:
                 // A line with nothing on it yet is not worth a block at all.
                 if hush && line.raw.trimmingCharacters(in: .whitespaces).isEmpty { continue }
-                rows.append(struck(line.raw))
-                if !hush { rows.append(quiet(line.reason ?? "skipped", "ink4")) }
+                row {
+                    page.put(line.raw, Type.mono, ink4, extra: [
+                        .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                        .strikethroughColor: Theme.shared.colour("line"),
+                    ])
+                }
+                if !hush { row { page.put(line.reason ?? "skipped", Type.mono, ink4) } }
             }
 
-            let live = line.n == caret
-            for (i, row) in rows.enumerated() {
-                // The bar runs down the whole block, one row at a time, so it
-                // marks the line being typed the way the terminal's does.
-                let piece = NSMutableAttributedString(string: live ? "▏ " : "  ", attributes: [
-                    .font: Type.mono,
-                    .foregroundColor: Theme.shared.colour(live ? "accent" : "sunk"),
-                ])
-                piece.append(row)
-                piece.addAttribute(
-                    .paragraphStyle, value: paragraph(last: i == rows.count - 1),
-                    range: NSRange(location: 0, length: piece.length))
-                out.append(piece)
-                out.append(NSAttributedString(string: "\n"))
-            }
-
-            if live { marked = NSRange(location: start, length: out.length - start) }
+            // Once over the block, then the gap over its last row, rather than
+            // a style laid over every row in it.
+            page.space(from: start, inside)
+            page.space(from: lastRow, between)
+            blocks[line.n] = NSRange(location: start, length: page.length - start)
         }
-        return (out, marked)
+        return (page.out, blocks)
     }
 
     /// The gap that separates one line's block from the next.
-    private static func paragraph(last: Bool) -> NSParagraphStyle {
+    ///
+    /// Made once. Two paragraph styles per row, times a page of rows, times
+    /// every keystroke, is a lot of objects to build and throw away to say the
+    /// same two things each time.
+    private static let inside = paragraph(spacing: 0, indent: 20)
+    private static let between = paragraph(spacing: 10, indent: 20)
+    private static let dayInside = paragraph(spacing: 0, indent: 22)
+    private static let dayBetween = paragraph(spacing: 9, indent: 22)
+
+    /// The pieces written on nearly every row, built once each.
+    private static let newline = NSAttributedString(string: "\n")
+    private static let dot = NSAttributedString(string: " · ", attributes: [
+        .font: Type.mono, .foregroundColor: Theme.shared.colour("ink4"),
+    ])
+    private static let barLit = NSAttributedString(string: "▏ ", attributes: [
+        .font: Type.mono, .foregroundColor: Theme.shared.colour("accent"),
+    ])
+    private static let barDark = NSAttributedString(string: "▏ ", attributes: [
+        .font: Type.mono, .foregroundColor: NSColor.clear,
+    ])
+
+    private static func paragraph(spacing: CGFloat, indent: CGFloat) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 1
-        style.paragraphSpacing = last ? 10 : 0
-        style.headIndent = 20
+        style.paragraphSpacing = spacing
+        style.headIndent = indent
         return style
-    }
-
-    /// What a line will be called.
-    private static func strong(_ s: String) -> NSAttributedString {
-        NSAttributedString(string: s, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium),
-            .foregroundColor: Theme.shared.colour("ink"),
-        ])
     }
 
     /// What the draft currently amounts to, in the same words the terminal uses.
@@ -189,86 +256,103 @@ enum Render {
     // ── one row ─────────────────────────────────────────────────────────────
 
     /// The quiet detail under a title: whose it is, when, and how loud.
-    private static func meta(_ task: PreviewTask, hue: Int?) -> NSAttributedString {
-        let out = NSMutableAttributedString()
-        var parts: [NSAttributedString] = []
+    private static func meta(_ page: Page, _ task: PreviewTask, hue: Int?) {
+        let ink3 = Theme.shared.colour("ink3")
+        var first = true
+        func part(_ body: () -> Void) {
+            if !first { page.append(dot) }
+            first = false
+            body()
+        }
 
-        let dot = NSMutableAttributedString(string: "● ", attributes: [
-            .font: Type.mono, .foregroundColor: Theme.shared.topicColour(hue),
-        ])
-        dot.append(quiet(task.topic, "ink3"))
-        parts.append(dot)
-
+        part {
+            page.put("● ", Type.mono, Theme.shared.topicColour(hue))
+            page.put(task.topic, Type.mono, ink3)
+        }
         if !task.dueLabel.isEmpty {
-            parts.append(NSAttributedString(string: task.dueLabel.lowercased(), attributes: [
-                .font: Type.mono, .foregroundColor: Theme.shared.colour("accent"),
-            ]))
+            part { page.put(task.dueLabel.lowercased(), Type.mono, Theme.shared.colour("accent")) }
         }
-        if !task.assignee.isEmpty { parts.append(quiet(task.assignee, "ink3")) }
+        if !task.assignee.isEmpty { part { page.put(task.assignee, Type.mono, ink3) } }
         if task.priority > 0 {
-            parts.append(NSAttributedString(
-                string: String(repeating: "!", count: task.priority),
-                attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("danger")]))
+            part {
+                page.put(String(repeating: "!", count: task.priority), Type.mono,
+                         Theme.shared.colour("danger"))
+            }
         }
-        for tag in task.tags { parts.append(quiet("#" + tag, "ink3")) }
-
-        for (i, part) in parts.enumerated() {
-            if i > 0 { out.append(quiet(" · ", "ink4")) }
-            out.append(part)
-        }
-        return out
+        for tag in task.tags { part { page.put("#" + tag, Type.mono, ink3) } }
     }
 
-    /// Where the cursor's row landed, so the list can be scrolled to it.
-    private(set) static var dayCursorRange: NSRange?
+    // ── the lists ───────────────────────────────────────────────────────────
 
     /// A list: its sections, one task to a block, the same shape the preview
     /// uses so the two windows read as one app.
-    static func day(_ day: Day, cursor: Int) -> NSAttributedString {
-        let out = NSMutableAttributedString()
-        dayCursorRange = nil
+    static func day(_ day: Day, cursor: Int) -> (NSAttributedString, NSRange?) {
+        let page = Page()
+        page.begin()
+        defer { page.end() }
+        let ink = Theme.shared.colour("ink")
+        let ink3 = Theme.shared.colour("ink3")
+        let ink4 = Theme.shared.colour("ink4")
+        let accent = Theme.shared.colour("accent")
+        let danger = Theme.shared.colour("danger")
+        var marked: NSRange?
         var index = 0
 
         for section in day.sections {
             if !section.label.isEmpty {
-                out.append(NSAttributedString(string: "  "))
-                out.append(NSAttributedString(string: section.label.uppercased(), attributes: [
-                    .font: Type.heading,
-                    .foregroundColor: Theme.shared.colour(section.late ? "danger" : "ink4"),
-                    .kern: 0.8,
-                    .paragraphStyle: dayParagraph(last: true),
-                ]))
-                out.append(NSAttributedString(string: "\n"))
+                let top = page.length
+                page.put("  " + section.label.uppercased(), Type.heading,
+                         section.late ? danger : ink4, extra: [.kern: 0.8])
+                page.append(newline)
+                // A heading hugs what it labels; the air belongs above it, and
+                // the block before it already leaves some.
+                page.space(from: top, dayInside)
             }
 
             for task in section.tasks {
                 let live = index == cursor
-                let rows = [title(task),
-                            line(task, hue: day.hues[task.topic], late: section.late)]
-                for (i, row) in rows.enumerated() {
-                    let piece = NSMutableAttributedString(
-                        string: live ? "▏ " : "  ",
-                        attributes: [
-                            .font: Type.mono,
-                            .foregroundColor: Theme.shared.colour(live ? "accent" : "sunk"),
-                        ])
-                    piece.append(row)
-                    piece.addAttribute(.paragraphStyle, value: dayParagraph(last: i == 1),
-                                       range: NSRange(location: 0, length: piece.length))
-                    if live && dayCursorRange == nil {
-                        dayCursorRange = NSRange(location: out.length, length: piece.length)
+                let start = page.length
+
+                var lastRow = page.length
+                func row(_ body: () -> Void) {
+                    lastRow = page.length
+                    page.append(live ? barLit : barDark)
+                    body()
+                    page.append(newline)
+                }
+
+                row { page.put("○ " + task.title, Type.strong, ink) }
+                row {
+                    page.put("  ● ", Type.mono, Theme.shared.topicColour(day.hues[task.topic]))
+                    page.put(task.topic, Type.mono, ink3)
+                    if !task.dueLabel.isEmpty {
+                        page.append(dot)
+                        page.put(task.dueLabel.lowercased(), Type.mono,
+                                 section.late ? danger : accent)
                     }
-                    out.append(piece)
-                    out.append(NSAttributedString(string: "\n"))
+                    if !task.assignee.isEmpty {
+                        page.append(dot)
+                        page.put(task.assignee, Type.mono, ink3)
+                    }
+                    if task.priority > 0 {
+                        page.append(dot)
+                        page.put(String(repeating: "!", count: task.priority), Type.mono, danger)
+                    }
+                }
+                page.space(from: start, dayInside)
+                page.space(from: lastRow, dayBetween)
+
+                if live && marked == nil {
+                    marked = NSRange(location: start, length: page.length - start)
                 }
                 index += 1
             }
         }
 
-        if out.length == 0 {
-            return quiet(empty(day), "ink3")
+        if page.length == 0 {
+            return (quiet(empty(day), "ink3"), nil)
         }
-        return out
+        return (page.out, marked)
     }
 
     /// What an empty list should say for itself, which is not the same thing in
@@ -288,46 +372,6 @@ enum Render {
         }
     }
 
-    private static func title(_ task: Task) -> NSAttributedString {
-        NSAttributedString(string: "○ " + task.title, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium),
-            .foregroundColor: Theme.shared.colour("ink"),
-        ])
-    }
-
-    private static func line(_ task: Task, hue: Int?, late: Bool) -> NSAttributedString {
-        let out = NSMutableAttributedString(string: "  ● ", attributes: [
-            .font: Type.mono, .foregroundColor: Theme.shared.topicColour(hue),
-        ])
-        out.append(quiet(task.topic, "ink3"))
-        if !task.dueLabel.isEmpty {
-            out.append(quiet(" · ", "ink4"))
-            out.append(NSAttributedString(string: task.dueLabel.lowercased(), attributes: [
-                .font: Type.mono,
-                .foregroundColor: Theme.shared.colour(late ? "danger" : "accent"),
-            ]))
-        }
-        if !task.assignee.isEmpty {
-            out.append(quiet(" · ", "ink4"))
-            out.append(quiet(task.assignee, "ink3"))
-        }
-        if task.priority > 0 {
-            out.append(quiet(" · ", "ink4"))
-            out.append(NSAttributedString(
-                string: String(repeating: "!", count: task.priority),
-                attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("danger")]))
-        }
-        return out
-    }
-
-    private static func dayParagraph(last: Bool) -> NSParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = 1
-        style.paragraphSpacing = last ? 9 : 0
-        style.headIndent = 22
-        return style
-    }
-
     /// A section label: the small, spaced capitals the other two front ends use.
     static func heading(_ s: String) -> NSAttributedString {
         NSAttributedString(string: s, attributes: [
@@ -341,12 +385,4 @@ enum Render {
         ])
     }
 
-    private static func struck(_ s: String) -> NSAttributedString {
-        NSAttributedString(string: s, attributes: [
-            .font: Type.mono,
-            .foregroundColor: Theme.shared.colour("ink4"),
-            .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-            .strikethroughColor: Theme.shared.colour("line"),
-        ])
-    }
 }

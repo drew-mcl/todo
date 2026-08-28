@@ -10,7 +10,7 @@ BAR_ID = com.drew-mcl.todo.capture
 # Every source but the app's own entry point, which a test replaces.
 BAR_LIB = $(filter-out mac/Sources/main.swift,$(wildcard mac/Sources/*.swift))
 
-.PHONY: all build ui bar bar-install bar-uninstall test test-go test-ui test-bar dev clean install
+.PHONY: all build ui bar bar-install bar-uninstall shot test test-go test-ui test-bar bench-bar dev clean install
 
 all: build
 
@@ -94,6 +94,12 @@ shot: build
 	$(SWIFT) -o mac/build/shot $(BAR_LIB) mac/Tests/shot/main.swift
 	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db \
 		SHOT=$$PWD/mac/build/shot.png mac/build/shot
+
+## bench-bar: what a keystroke costs in the capture window (needs Swift)
+bench-bar: build
+	@mkdir -p mac/build
+	$(SWIFT) -O -o mac/build/bar-bench $(BAR_LIB) mac/Tests/bench/main.swift
+	@TODO_BIN=$$PWD/todo TODO_DB=$$(mktemp -d)/todo.db mac/build/bar-bench
 
 ## test-bar: the capture bar, against a live bridge (needs Swift)
 test-bar: build

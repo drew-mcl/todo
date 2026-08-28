@@ -90,7 +90,11 @@ type BridgeDay struct {
 	Sections []BridgeSection `json:"sections"`
 	Done     int             `json:"done"`
 	Open     int             `json:"open"`
-	Hues     map[string]int  `json:"hues"`
+	// Total is how many match; the sections may hold fewer, because sending
+	// every task of a very long list would be the bug.
+	Total     int            `json:"total"`
+	Truncated bool           `json:"truncated"`
+	Hues      map[string]int `json:"hues"`
 }
 
 // BridgeSection is a labelled run. An empty label runs straight down the page.
@@ -242,12 +246,18 @@ func list(st *store.Store, now time.Time, view string) (*BridgeDay, error) {
 		add("unscheduled", false, plan.Unscheduled)
 
 	case "all", "logbook":
-		tasks, err := st.List(store.Query{
-			View: store.View(view), Sort: store.SortManual, Limit: listLimit}, now)
+		q := store.Query{View: store.View(view), Sort: store.SortManual}
+		total, err := st.Count(q, now)
+		if err != nil {
+			return nil, err
+		}
+		q.Limit = listLimit
+		tasks, err := st.List(q, now)
 		if err != nil {
 			return nil, err
 		}
 		out.Label = view
+		out.Total, out.Truncated = total, total > len(tasks)
 		add("", false, tasks)
 
 	default:

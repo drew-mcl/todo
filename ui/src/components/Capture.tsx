@@ -355,6 +355,9 @@ export function Capture({
                 setPending(out.pending);
                 if (out.value !== draft) setDraft(out.value);
                 caret.current = out.at;
+                // Moving the caret from here does not raise a select event, so
+                // the line it is on has to be said rather than observed.
+                setCaret(out.value.slice(0, out.at).split("\n").length);
 
                 if (out.exit === "help") setSheet(true);
                 if (out.exit === "file") void commit();

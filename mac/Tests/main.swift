@@ -96,7 +96,8 @@ bridge.send("hello") { reply in
 
         // The preview says the same thing the terminal says.
         let hues = reply.hues ?? [:]
-        let (rendered, marked) = Render.preview(preview, hues: hues, caret: 3)
+        let (rendered, blocks) = Render.preview(preview, hues: hues, caret: 3)
+        let marked = blocks[3]
         let shown = rendered.string
         check("the preview names what each line becomes",
               shown.contains("chase the vendor about the patch")
@@ -120,8 +121,11 @@ bridge.send("hello") { reply in
             check("the mark is on the line the caret is on",
                   row.contains("write the postmortem"), row.trimmingCharacters(in: .newlines))
         }
-        check("only the caret's block is lit",
-              marked.map { $0.length > 0 && NSMaxRange($0) <= (shown as NSString).length } ?? false)
+        check("every line has a block the bar can be moved to",
+              blocks.count == preview.lines.filter { $0.kind != "note" }.count,
+              "\(blocks.count) blocks for \(preview.lines.count) lines")
+        check("the blocks all fall inside the page",
+              blocks.values.allSatisfy { NSMaxRange($0) <= (shown as NSString).length })
 
         // The ditto line takes the topic above it, and shares its dot.
         let topics = preview.lines.compactMap { $0.task?.topic }

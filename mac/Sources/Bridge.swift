@@ -87,6 +87,8 @@ struct Day: Decodable {
     let sections: [Section]
     let done: Int
     let open: Int
+    let total: Int?
+    let truncated: Bool?
     let hues: [String: Int]
 }
 

@@ -90,4 +90,5 @@ enum Type {
     static let mono = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
     static let title = NSFont.systemFont(ofSize: 13.5)
     static let heading = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+    static let strong = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .medium)
 }

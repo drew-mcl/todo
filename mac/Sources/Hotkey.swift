@@ -67,7 +67,8 @@ final class Hotkey {
     }
 
     func unregisterAll() {
-        for id in refs.keys { unregister(id) }
+        // Over a copy: unregister mutates the dictionary these came from.
+        for id in Array(refs.keys) { unregister(id) }
     }
 
     /// Combination reads "cmd+shift+space" and the like.

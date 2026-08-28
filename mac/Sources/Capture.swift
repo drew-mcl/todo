@@ -49,7 +49,6 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private let addButton = Pill()
     private var draft: NSTextView!
     private var previewView: NSTextView!
-    private var previewScroll: NSScrollView!
 
     private var latest: Preview?
     private var hues: [String: Int] = [:]
@@ -62,7 +61,10 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private var vim = VimState(text: "", at: 0)
     private var sheet: NSTextView?
     private var takeBack: TakeBack?
-    private var previousApp: NSRunningApplication?
+
+    /// Where each parsed line's block sits in the preview, and which one is lit.
+    private var blocks: [Int: NSRange] = [:]
+    private var markedLine = 0
 
     /// The last thing this window did, and the draft it did it to.
     ///
@@ -97,7 +99,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     func toggle() { isShowing && panel.isKeyWindow ? hide() : show() }
 
     func show() {
-        previousApp = NSWorkspace.shared.frontmostApplication
+        Interrupted.remember()
         if !panel.isVisible { panel.positionOnActiveScreen() }
         panel.level = .floating
         NSApp.activate(ignoringOtherApps: true)
@@ -113,11 +115,18 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     }
 
     func hide() {
-        removeMonitor()
-        panel.orderOut(nil)
+        conceal()
         // Back to whatever the note was about, without a trip through the Dock.
-        previousApp?.activate()
-        previousApp = nil
+        Interrupted.restore()
+    }
+
+    /// Out of the way, but still ours: handing over to the other window must not
+    /// give the keyboard back to the app underneath on the way past.
+    func conceal() {
+        removeMonitor()
+        settle?.invalidate()
+        debounce?.invalidate()
+        panel.orderOut(nil)
     }
 
     /// Clicking away does not close this window and does not empty it.
@@ -186,7 +195,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         case .today:
             // Out of the box and into the lists, where t w a l are one letter
             // each -- here they are word-forward and append.
-            hide()
+            conceal()
             NotificationCenter.default.post(name: .todoToday, object: nil)
         case .pass:
             return false
@@ -270,9 +279,31 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         }
     }
 
+    /// Moving the caret changes which block is lit and nothing else, so it
+    /// recolours two of them. Rebuilding the page for an arrow key cost six
+    /// milliseconds a keypress on a page-long paste, and thirty on a long one.
     func textViewDidChangeSelection(_ notification: Notification) {
-        // Only the marker moved, and the parse has not changed.
-        render()
+        let line = caretLine
+        guard line != markedLine else { return }
+        light(markedLine, false)
+        light(line, true)
+        markedLine = line
+        if let block = blocks[line] { previewView.scrollRangeToVisible(block) }
+    }
+
+    /// Colour a block's bar, one row at a time: it is the first character of
+    /// each line the block covers.
+    private func light(_ line: Int, _ on: Bool) {
+        guard let storage = previewView.textStorage, let block = blocks[line],
+              NSMaxRange(block) <= storage.length else { return }
+        let colour: NSColor = on ? Theme.shared.colour("accent") : .clear
+        (storage.string as NSString).enumerateSubstrings(
+            in: block, options: [.byLines, .substringNotRequired]
+        ) { _, row, _, _ in
+            guard row.length > 0 else { return }
+            storage.addAttribute(.foregroundColor, value: colour,
+                                 range: NSRange(location: row.location, length: 1))
+        }
     }
 
     private func reparse() {
@@ -437,11 +468,13 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
     private func drawPreview() {
         guard let storage = previewView.textStorage else { return }
         let settled = Date().timeIntervalSince(lastTyped) > Self.quietFor
-        let (text, marked) = Render.preview(latest, hues: hues, caret: caretLine, settled: settled)
+        markedLine = caretLine
+        let (text, found) = Render.preview(latest, hues: hues, caret: markedLine, settled: settled)
         storage.setAttributedString(text)
+        blocks = found
         // Follow the line being typed rather than sitting at the top of a page
         // you typed several minutes ago.
-        if let marked { previewView.scrollRangeToVisible(marked) }
+        if let block = blocks[markedLine] { previewView.scrollRangeToVisible(block) }
     }
 
     private func drawChrome() {
@@ -527,7 +560,6 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
 
         let (previewScrollView, preview) = Self.textView(editable: false)
         previewView = preview
-        previewScroll = previewScrollView
         previewView.textContainerInset = NSSize(width: 18, height: 10)
 
         let divider = NSBox()
