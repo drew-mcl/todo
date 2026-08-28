@@ -1,16 +1,20 @@
 import AppKit
 
-// The day, on a key, over whatever you were doing.
+// The lists, over whatever you were doing.
 //
 // The same panel as the capture box and the same colours, because it is the
-// same app arriving the same way -- you press something and the list is in
-// front of you without a Space to travel to or a window to find.
+// same app arriving the same way -- you press something and it is in front of
+// you without a Space to travel to or a window to find.
 //
-// It holds no list of its own. `todo bridge` says what is due and what has
-// slipped, and closing one sends it straight back; the terminal app and the
-// browser see it immediately, because there is only ever one database.
+// The keys are the terminal app's, because these are the same four lists: t
+// today, w the week, a everything open, l the logbook, n back to the box. One
+// vocabulary for one set of lists; a second would be one too many.
+//
+// It holds nothing of its own. `todo bridge` says what is in each, and closing
+// one sends it straight back -- the terminal and the browser see it at once,
+// because there is only ever one database.
 
-final class TodayController: NSObject, NSWindowDelegate {
+final class ListController: NSObject, NSWindowDelegate {
     let panel = CapturePanel(size: NSSize(width: 560, height: 440))
 
     private let bridge: Bridge
@@ -21,6 +25,7 @@ final class TodayController: NSObject, NSWindowDelegate {
     private var listScroll: NSScrollView!
 
     private var day: Day?
+    private var view = "today"
     private var cursor = 0
     private var monitor: Any?
     private var previousApp: NSRunningApplication?
@@ -36,7 +41,16 @@ final class TodayController: NSObject, NSWindowDelegate {
 
     func toggle() { panel.isVisible && panel.isKeyWindow ? hide() : show() }
 
-    func show() {
+    func show(_ which: String = "today") {
+        if which != view {
+            view = which
+            cursor = 0
+            day = nil
+        }
+        appear()
+    }
+
+    private func appear() {
         previousApp = NSWorkspace.shared.frontmostApplication
         if !panel.isVisible { panel.positionOnActiveScreen() }
         panel.level = .floating
@@ -77,10 +91,9 @@ final class TodayController: NSObject, NSWindowDelegate {
         monitor = nil
     }
 
-    /// The list keys the rest of the app uses: j and k to move, x to close one
-    /// out, esc to go back to whatever this interrupted.
+    /// The terminal app's keys, because these are the terminal app's lists.
     private func handle(_ event: NSEvent) -> Bool {
-        guard panel.isKeyWindow else { return false }
+        guard panel.isKeyWindow, !event.modifierFlags.contains(.command) else { return false }
         let all = every()
 
         switch event.charactersIgnoringModifiers {
@@ -101,8 +114,15 @@ final class TodayController: NSObject, NSWindowDelegate {
         case "x", " ", "\r":
             guard cursor < all.count else { return true }
             close(all[cursor])
+
+        // The other lists, one letter each.
+        case "t": show("today")
+        case "w": show("week")
+        case "a": show("all")
+        case "l": show("logbook")
+
         case "n":
-            // Straight into the capture box, which is the other half of this.
+            // Back into the box, which is the other half of this.
             hide()
             NotificationCenter.default.post(name: .todoCapture, object: nil)
         default:
@@ -113,10 +133,10 @@ final class TodayController: NSObject, NSWindowDelegate {
 
     // ── the day ─────────────────────────────────────────────────────────────
 
-    private func every() -> [Task] { (day?.tasks ?? []) + (day?.overdue ?? []) }
+    private func every() -> [Task] { (day?.sections ?? []).flatMap(\.tasks) }
 
     private func reload() {
-        bridge.send("today") { [weak self] reply in
+        bridge.send("list", view: view) { [weak self] reply in
             guard let self else { return }
             guard let day = reply.day else {
                 self.heading.stringValue = reply.error ?? "todo bridge did not answer"
@@ -131,7 +151,7 @@ final class TodayController: NSObject, NSWindowDelegate {
     /// Closing one out. The reply carries the day back, so the list redraws
     /// from what is actually stored rather than from a guess.
     private func close(_ task: Task) {
-        bridge.send("toggle", task: task.id) { [weak self] reply in
+        bridge.send("toggle", task: task.id, view: view) { [weak self] reply in
             guard let self else { return }
             guard let day = reply.day else { return }
             self.day = day
@@ -146,11 +166,15 @@ final class TodayController: NSObject, NSWindowDelegate {
             string: day.label,
             attributes: [.font: Type.title, .foregroundColor: Theme.shared.colour("ink")])
 
-        let open = day.tasks.count
+        // Today counts what is left of the day; the other lists just say how
+        // many, because "3 of 40 done" is not a fact about anything.
+        let total = every().count
         meter.attributedStringValue = Render.heading(
-            open + day.done == 0
-                ? "NOTHING DUE"
-                : "\(day.done) OF \(open + day.done) DONE")
+            day.view == "today"
+                ? (day.open + day.done == 0
+                    ? "NOTHING DUE"
+                    : "\(day.done) OF \(day.open + day.done) DONE")
+                : (total == 1 ? "1 TASK" : "\(total) TASKS"))
 
         list.textStorage?.setAttributedString(
             Render.day(day, cursor: cursor))
@@ -173,7 +197,7 @@ final class TodayController: NSObject, NSWindowDelegate {
         footRule.boxType = .separator
 
         keys.attributedStringValue = NSAttributedString(
-            string: "j k move · x done · n capture · esc close",
+            string: "t today · w week · a all · l logbook · n new · x done · esc close",
             attributes: [.font: Type.mono, .foregroundColor: Theme.shared.colour("ink4")])
 
         let views: [NSView] = [heading, meter, headRule, scroll, footRule, keys]

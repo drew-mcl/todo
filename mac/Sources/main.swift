@@ -41,7 +41,7 @@ enum Shortcut: UInt32 {
     var otherwise: String {
         switch self {
         case .capture: return "n from the day"
-        case .today: return "⌘T from the box"
+        case .today: return "⌘T from the box, then t w a l"
         case .web: return ""
         }
     }
@@ -58,7 +58,7 @@ enum Shortcut: UInt32 {
 final class Bar: NSObject, NSApplicationDelegate {
     private var bridge: Bridge?
     private var capture: CaptureController?
-    private var today: TodayController?
+    private var lists: ListController?
     private var status: NSStatusItem?
 
     /// What is wrong, if anything. A hotkey that could not be claimed is
@@ -98,7 +98,7 @@ final class Bar: NSObject, NSApplicationDelegate {
         }
 
         capture = CaptureController(bridge: bridge)
-        today = TodayController(bridge: bridge)
+        lists = ListController(bridge: bridge)
 
         // The day window hands over to the capture box rather than knowing how
         // to open one itself.
@@ -107,10 +107,10 @@ final class Bar: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in self?.capture?.show() }
         NotificationCenter.default.addObserver(
             forName: .todoToday, object: nil, queue: .main
-        ) { [weak self] _ in self?.today?.show() }
+        ) { [weak self] _ in self?.lists?.show() }
 
         claim(.capture) { [weak self] in self?.capture?.toggle() }
-        claim(.today) { [weak self] in self?.today?.toggle() }
+        claim(.today) { [weak self] in self?.lists?.toggle() }
         claim(.web) { [weak self] in self?.openWeb() }
         refreshMenu()
     }
@@ -175,7 +175,7 @@ final class Bar: NSObject, NSApplicationDelegate {
         status?.menu = menu
     }
 
-    @objc private func openToday() { today?.show() }
+    @objc private func openToday() { lists?.show() }
 
     @objc private func openCapture() { capture?.show() }
 

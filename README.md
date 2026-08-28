@@ -142,10 +142,21 @@ The hotkey is `⌥Space` unless you say otherwise:
 defaults write com.drew-mcl.todo.capture hotkey "ctrl+opt+t"
 ```
 
-`⌘T` from there shows the day instead: what is due, what has slipped, `j`/`k` to
-move and `x` to close one out. `n` comes back. It holds no list of its own — the
-same database the other two front ends read, so ticking something here is ticked
-everywhere by the time the window has closed.
+`⌘T` from there opens the lists, where the keys are the terminal app's because
+they are the terminal app's lists:
+
+```
+t today · w week · a all · l logbook · n new
+j/k move · x done · esc close
+```
+
+They are single letters there and cannot be in the box, where `w` is a word
+forward and `a` starts typing. So the box is for writing and the lists are for
+looking, with one key between them.
+
+The lists hold nothing of their own — the same database the other two front ends
+read, so ticking something here is ticked everywhere by the time the window has
+closed.
 
 One global key, not three. A shortcut is taken from every application on the
 machine and this is a small app; the other windows are one keystroke away once

@@ -17,7 +17,7 @@ enum Press: Equatable {
     case reverse
     /// Out of the name of the call before out of the window.
     case leaveTitle
-    /// Hand over to the day, which is the other window this app is.
+    /// Hand over to the lists, which are the other window this app is.
     case today
     /// Not ours; let the text view have it.
     case pass

@@ -83,6 +83,7 @@ SWIFT = swiftc -swift-version 5 -target $(shell uname -m)-apple-macos13 \
 export DRAFT
 export WINDOW
 export MODE
+export VIEW
 
 ## shot: draw a window to mac/build/shot.png, to look at it
 ##   make shot                       the capture box

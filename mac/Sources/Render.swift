@@ -222,28 +222,30 @@ enum Render {
     /// Where the cursor's row landed, so the list can be scrolled to it.
     private(set) static var dayCursorRange: NSRange?
 
-    /// The day: what is due, then what has slipped. One task to a block, the
-    /// same shape the preview uses, so the two windows read as one app.
+    /// A list: its sections, one task to a block, the same shape the preview
+    /// uses so the two windows read as one app.
     static func day(_ day: Day, cursor: Int) -> NSAttributedString {
         let out = NSMutableAttributedString()
         dayCursorRange = nil
         var index = 0
 
-        func section(_ name: String, _ tasks: [Task], late: Bool) {
-            guard !tasks.isEmpty else { return }
-            out.append(NSAttributedString(string: "  "))
-            out.append(NSAttributedString(string: name.uppercased(), attributes: [
-                .font: Type.heading,
-                .foregroundColor: Theme.shared.colour(late ? "danger" : "ink4"),
-                .kern: 0.8,
-                .paragraphStyle: dayParagraph(last: true),
-            ]))
-            out.append(NSAttributedString(string: "\n"))
+        for section in day.sections {
+            if !section.label.isEmpty {
+                out.append(NSAttributedString(string: "  "))
+                out.append(NSAttributedString(string: section.label.uppercased(), attributes: [
+                    .font: Type.heading,
+                    .foregroundColor: Theme.shared.colour(section.late ? "danger" : "ink4"),
+                    .kern: 0.8,
+                    .paragraphStyle: dayParagraph(last: true),
+                ]))
+                out.append(NSAttributedString(string: "\n"))
+            }
 
-            for task in tasks {
+            for task in section.tasks {
                 let live = index == cursor
-                for (i, row) in [title(task), line(task, hue: day.hues[task.topic], late: late)]
-                    .enumerated() {
+                let rows = [title(task),
+                            line(task, hue: day.hues[task.topic], late: section.late)]
+                for (i, row) in rows.enumerated() {
                     let piece = NSMutableAttributedString(
                         string: live ? "▏ " : "  ",
                         attributes: [
@@ -263,15 +265,27 @@ enum Render {
             }
         }
 
-        section("due today", day.tasks, late: false)
-        section("overdue", day.overdue, late: true)
-
         if out.length == 0 {
-            return quiet(day.done > 0
-                ? "that is today done. \(day.done) closed."
-                : "nothing due today.", "ink3")
+            return quiet(empty(day), "ink3")
         }
         return out
+    }
+
+    /// What an empty list should say for itself, which is not the same thing in
+    /// each of them: a day with nothing left is the best thing that happens.
+    private static func empty(_ day: Day) -> String {
+        switch day.view {
+        case "today":
+            return day.done > 0
+                ? "that is today done. \(day.done) closed."
+                : "nothing due today."
+        case "week":
+            return "nothing scheduled this week."
+        case "logbook":
+            return "nothing finished yet."
+        default:
+            return "nothing open. press n to write something down."
+        }
     }
 
     private static func title(_ task: Task) -> NSAttributedString {

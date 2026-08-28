@@ -159,52 +159,68 @@ func TestBridgeCapturesAndUndoes(t *testing.T) {
 	}
 }
 
-// The day window holds no list of its own, so the bridge has to hand it one --
-// and closing something out has to come back as the day, not as a promise.
-func TestBridgeServesTheDay(t *testing.T) {
-	replies := talk(t,
-		BridgeRequest{ID: 1, Op: "capture",
-			Draft: "prod issue | chase the vendor | today @sam !!\n" +
-				"admin | pull the numbers | today\n" +
-				"personal | book the dentist | 2026-08-20"},
-		BridgeRequest{ID: 2, Op: "today"},
-	)
+// The list window holds no list of its own, so the bridge has to hand it one --
+// and closing something out has to come back as the list, not as a promise.
+func TestBridgeServesTheLists(t *testing.T) {
+	seed := "prod issue | chase the vendor | today @sam !!\n" +
+		"admin | pull the numbers | today\n" +
+		"personal | book the dentist | 2026-08-20\n" +
+		"ops | rotate the certs | eow"
 
-	day := replies[1].Day
+	day := talk(t,
+		BridgeRequest{ID: 1, Op: "capture", Draft: seed},
+		BridgeRequest{ID: 2, Op: "list", View: "today"},
+	)[1].Day
 	if day == nil {
-		t.Fatalf("no day came back: %s", replies[1].Error)
+		t.Fatal("no list came back")
 	}
-	if len(day.Tasks) != 2 {
-		t.Errorf("%d due today, want 2", len(day.Tasks))
+	if day.Label == "" || day.View != "today" {
+		t.Errorf("today came back as %q / %q", day.View, day.Label)
 	}
-	if len(day.Overdue) != 1 {
-		t.Errorf("%d overdue, want 1", len(day.Overdue))
+	labels := map[string]int{}
+	for _, s := range day.Sections {
+		labels[s.Label] = len(s.Tasks)
 	}
-	if day.Overdue[0].DueLabel == "" {
-		t.Error("an overdue task came back without a label to show for it")
-	}
-	if day.Label == "" {
-		t.Error("the day has no name")
+	if labels["due today"] != 2 || labels["overdue"] != 1 {
+		t.Errorf("today is split as %v", labels)
 	}
 	if _, ok := day.Hues["prod issue"]; !ok {
 		t.Errorf("no colour for a topic on screen: %v", day.Hues)
 	}
 
-	// Closing one out answers with the day it left behind.
-	after := talk(t,
+	// The week runs a day to a section, and the other two run straight down.
+	for _, view := range []string{"week", "all", "logbook"} {
+		got := talk(t,
+			BridgeRequest{ID: 1, Op: "capture", Draft: seed},
+			BridgeRequest{ID: 2, Op: "list", View: view},
+		)[1].Day
+		if got == nil {
+			t.Fatalf("%s came back empty", view)
+		}
+		if got.View != view {
+			t.Errorf("asked for %q and got %q", view, got.View)
+		}
+		if view != "logbook" && len(got.Sections) == 0 {
+			t.Errorf("%s has nothing in it", view)
+		}
+	}
+
+	// Closing one out answers with the list it left behind.
+	opened := talk(t,
 		BridgeRequest{ID: 1, Op: "capture", Draft: "admin | pull the numbers | today"},
-		BridgeRequest{ID: 2, Op: "today"},
-	)
-	id := after[1].Day.Tasks[0].ID
+		BridgeRequest{ID: 2, Op: "list", View: "today"},
+	)[1].Day
+	id := opened.Sections[0].Tasks[0].ID
 	closed := talk(t,
 		BridgeRequest{ID: 1, Op: "capture", Draft: "admin | pull the numbers | today"},
-		BridgeRequest{ID: 2, Op: "toggle", Task: id},
+		BridgeRequest{ID: 2, Op: "toggle", Task: id, View: "today"},
 	)[1]
 	if closed.Day == nil {
-		t.Fatalf("toggle did not answer with the day: %s", closed.Error)
+		t.Fatalf("toggle did not answer with the list: %s", closed.Error)
 	}
-	if len(closed.Day.Tasks) != 0 || closed.Day.Done != 1 {
-		t.Errorf("after closing one: %d left, %d done", len(closed.Day.Tasks), closed.Day.Done)
+	if len(closed.Day.Sections) != 0 || closed.Day.Done != 1 {
+		t.Errorf("after closing one: %d sections, %d done",
+			len(closed.Day.Sections), closed.Day.Done)
 	}
 }
 

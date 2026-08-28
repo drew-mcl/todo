@@ -70,10 +70,10 @@ if env["WINDOW"] == "today" {
     let until = Date().addingTimeInterval(3)
     while !seeded && Date() < until { pump(0.05) }
 
-    let today = TodayController(bridge: bridge)
+    let today = ListController(bridge: bridge)
     today.panel.setContentSize(NSSize(width: 560, height: 440))
     today.panel.orderFront(nil)
-    today.show()
+    today.show(env["VIEW"] ?? "today")
     guard let view = today.panel.contentView else {
         print("the window did not build")
         exit(1)

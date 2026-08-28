@@ -184,6 +184,8 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         case .leaveTitle:
             panel.makeFirstResponder(draft)
         case .today:
+            // Out of the box and into the lists, where t w a l are one letter
+            // each -- here they are word-forward and append.
             hide()
             NotificationCenter.default.post(name: .todoToday, object: nil)
         case .pass:
@@ -550,7 +552,7 @@ final class CaptureController: NSObject, NSTextViewDelegate, NSWindowDelegate {
         addButton.onClick = { [weak self] in self?.fileAndClose() }
 
         let keys = NSTextField(
-            labelWithString: "esc file · ⌘⌫ scrap · ⌘T today · ⌘/ keys")
+            labelWithString: "esc file · ⌘⌫ scrap · ⌘T lists · ⌘/ keys")
         keys.font = Type.mono
         keys.textColor = Theme.shared.colour("ink4")
 

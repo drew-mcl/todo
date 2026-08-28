@@ -75,11 +75,18 @@ struct Task: Decodable {
     let priority: Int
 }
 
-struct Day: Decodable {
+struct Section: Decodable {
     let label: String
+    let late: Bool
     let tasks: [Task]
-    let overdue: [Task]
+}
+
+struct Day: Decodable {
+    let view: String
+    let label: String
+    let sections: [Section]
     let done: Int
+    let open: Int
     let hues: [String: Int]
 }
 
@@ -216,7 +223,8 @@ final class Bridge {
 
     @discardableResult
     func send(_ op: String, draft: String = "", title: String = "", batch: Int = 0,
-              task: Int = 0, then handler: @escaping (Reply) -> Void) -> Int {
+              task: Int = 0, view: String = "",
+              then handler: @escaping (Reply) -> Void) -> Int {
         if process == nil && !stopping { start() }
         nextID += 1
         let id = nextID
@@ -227,6 +235,7 @@ final class Bridge {
         if !title.isEmpty { body["title"] = title }
         if batch != 0 { body["batch"] = batch }
         if task != 0 { body["task"] = task }
+        if !view.isEmpty { body["view"] = view }
 
         guard var data = try? JSONSerialization.data(withJSONObject: body) else { return id }
         data.append(0x0A)

@@ -31,6 +31,7 @@ type BridgeRequest struct {
 	Title string `json:"title,omitempty"`
 	Batch int64  `json:"batch,omitempty"`
 	Task  int64  `json:"task,omitempty"`
+	View  string `json:"view,omitempty"`
 }
 
 // BridgeReply is one line of output. Exactly one of the result fields is set.
@@ -81,14 +82,22 @@ type BridgeAdded struct {
 	Today   int   `json:"today"`
 }
 
-// BridgeDay is today, for the window that shows it: what is due, what has
-// slipped, and how much of it is already done.
+// BridgeDay is a list for the window that shows one: a name, some labelled runs
+// of tasks, and how much of the day is already behind you.
 type BridgeDay struct {
-	Label   string         `json:"label"`
-	Tasks   []Task         `json:"tasks"`
-	Overdue []Task         `json:"overdue"`
-	Done    int            `json:"done"`
-	Hues    map[string]int `json:"hues"`
+	View     string          `json:"view"`
+	Label    string          `json:"label"`
+	Sections []BridgeSection `json:"sections"`
+	Done     int             `json:"done"`
+	Open     int             `json:"open"`
+	Hues     map[string]int  `json:"hues"`
+}
+
+// BridgeSection is a labelled run. An empty label runs straight down the page.
+type BridgeSection struct {
+	Label string `json:"label"`
+	Late  bool   `json:"late"`
+	Tasks []Task `json:"tasks"`
 }
 
 // bridgeVersion changes when the wire shapes do, so a stale bar can say so
@@ -170,10 +179,10 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 			Today:   counts[store.ViewToday],
 		}
 
-	case "today":
-		day, err := today(st, now())
+	case "list":
+		day, err := list(st, now(), req.View)
 		if err != nil {
-			return fail("reading the day: %v", err)
+			return fail("reading the list: %v", err)
 		}
 		reply.Day = day
 
@@ -181,9 +190,9 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 		if _, err := st.Toggle(req.Task, now()); err != nil {
 			return fail("closing that one: %v", err)
 		}
-		day, err := today(st, now())
+		day, err := list(st, now(), req.View)
 		if err != nil {
-			return fail("reading the day: %v", err)
+			return fail("reading the list: %v", err)
 		}
 		reply.Day = day
 
@@ -200,33 +209,75 @@ func answer(st *store.Store, now func() time.Time, req BridgeRequest) BridgeRepl
 	return reply
 }
 
-// today is the day as the window shows it: what is due, then what has slipped,
-// which is the order you would want to be asked about them in.
-func today(st *store.Store, now time.Time) (*BridgeDay, error) {
-	due, err := st.List(store.Query{View: store.ViewToday, Sort: store.SortManual}, now)
-	if err != nil {
-		return nil, err
+// list is one of the views the window can show, in the shape it draws.
+//
+// The names are the terminal app's -- today, week, all, logbook -- because they
+// are the same lists reached by the same letters, and a second vocabulary for
+// the same four things would be one too many.
+func list(st *store.Store, now time.Time, view string) (*BridgeDay, error) {
+	out := &BridgeDay{View: view}
+	var seen []*store.Task
+
+	add := func(label string, late bool, tasks []*store.Task) {
+		if len(tasks) == 0 {
+			return
+		}
+		seen = append(seen, tasks...)
+		out.Sections = append(out.Sections, BridgeSection{
+			Label: label, Late: late, Tasks: taskDTOs(tasks, now),
+		})
 	}
-	late, err := st.List(store.Query{View: store.ViewOverdue, Sort: store.SortManual}, now)
-	if err != nil {
-		return nil, err
+
+	switch view {
+	case "week":
+		plan, err := st.Week(store.WeekStart(now), now, store.Query{})
+		if err != nil {
+			return nil, err
+		}
+		out.Label = "this week"
+		add("overdue", true, plan.Overdue)
+		for _, day := range plan.Days {
+			add(strings.ToLower(day.Date.Format("Mon 2 Jan")), false, day.Tasks)
+		}
+		add("unscheduled", false, plan.Unscheduled)
+
+	case "all", "logbook":
+		tasks, err := st.List(store.Query{
+			View: store.View(view), Sort: store.SortManual, Limit: listLimit}, now)
+		if err != nil {
+			return nil, err
+		}
+		out.Label = view
+		add("", false, tasks)
+
+	default:
+		due, err := st.List(store.Query{View: store.ViewToday, Sort: store.SortManual}, now)
+		if err != nil {
+			return nil, err
+		}
+		late, err := st.List(store.Query{View: store.ViewOverdue, Sort: store.SortManual}, now)
+		if err != nil {
+			return nil, err
+		}
+		out.View = "today"
+		out.Label = strings.ToLower(now.Format("Mon 2 January"))
+		add("due today", false, due)
+		add("overdue", true, late)
+		out.Open = len(due)
 	}
+
 	done, err := st.DoneOn(now)
 	if err != nil {
 		return nil, err
 	}
+	out.Done = done
 
-	names := make([]string, 0, len(due)+len(late))
-	for _, t := range append(append([]*store.Task{}, due...), late...) {
+	names := make([]string, 0, len(seen))
+	for _, t := range seen {
 		names = append(names, t.Topic)
 	}
-	return &BridgeDay{
-		Label:   strings.ToLower(now.Format("Mon 2 January")),
-		Tasks:   taskDTOs(due, now),
-		Overdue: taskDTOs(late, now),
-		Done:    done,
-		Hues:    palette.Assign(names),
-	}, nil
+	out.Hues = palette.Assign(names)
+	return out, nil
 }
 
 // previewHues gives every topic in a draft a colour of its own, by the same
